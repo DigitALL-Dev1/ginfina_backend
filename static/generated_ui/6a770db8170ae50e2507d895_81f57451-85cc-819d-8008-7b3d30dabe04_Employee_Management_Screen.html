@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <title>Employee Management</title>
+</head>
+<body class="bg-gray-100 font-sans antialiased">
+    <div class="min-h-screen flex">
+        <!-- Sidebar -->
+        <div class="w-64 bg-white border-r flex flex-col">
+            <div class="p-4 border-b">
+                <h1 class="text-lg font-semibold">GX1 Platform</h1>
+            </div>
+            <div class="flex-grow">
+                <button class="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 m-4 rounded-md">
+                    Employee Management
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="flex-grow p-6">
+            <div class="border-b mb-4">
+                <h2 class="text-xl font-semibold">Employee Management</h2>
+            </div>
+            <form class="bg-white p-6 rounded-lg shadow-md">
+                <div class="mb-4">
+                    <label for="employee-id" class="block text-sm font-medium mb-2">
+                        Employee ID *
+                    </label>
+                    <input type="text" id="employee-id" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:border-green-500 focus:ring-green-500" required>
+                </div>
+                <div class="mb-4">
+                    <label for="joining-date" class="block text-sm font-medium mb-2">
+                        Joining Date *
+                    </label>
+                    <input type="date" id="joining-date" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:border-green-500 focus:ring-green-500" required>
+                </div>
+                <button type="submit" class="mt-4 bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-md">
+                    Save
+                </button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

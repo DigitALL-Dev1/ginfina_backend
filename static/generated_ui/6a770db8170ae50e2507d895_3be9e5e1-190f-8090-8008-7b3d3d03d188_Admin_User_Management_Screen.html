@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin User Management</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+    <div class="flex min-h-screen">
+        <div class="w-1/4 bg-white border-r">
+            <div class="p-4 text-lg font-bold">GX1 Platform</div>
+            <button class="bg-green-600 text-white rounded-md mx-4 my-2 px-4 py-2 hover:bg-green-700">
+                Admin Management
+            </button>
+        </div>
+        <div class="w-3/4 p-6">
+            <div class="text-xl font-semibold mb-4 border-b pb-2">Admin User Management</div>
+            <div class="p-6 bg-white rounded-md shadow-md">
+                <form action="#" class="space-y-6">
+                    <div>
+                        <label for="admin-id" class="block text-sm font-medium text-gray-700">Admin ID *</label>
+                        <input type="text" id="admin-id" name="admin-id" required class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:border-green-500 focus:ring-green-500">
+                    </div>
+                    <div>
+                        <label for="role" class="block text-sm font-medium text-gray-700">Role *</label>
+                        <input type="text" id="role" name="role" required class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:border-green-500 focus:ring-green-500">
+                    </div>
+                    <div>
+                        <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 shadow-sm">
+                            Update
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

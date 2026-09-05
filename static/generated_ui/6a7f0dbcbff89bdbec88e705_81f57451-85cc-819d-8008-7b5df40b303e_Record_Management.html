@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="font-sans antialiased">
+    <div class="flex min-h-screen">
+        <!-- Sidebar -->
+        <div class="w-64 bg-white border-r">
+            <div class="p-4">
+                <h1 class="text-lg font-bold">GX1 Platform</h1>
+            </div>
+            <div class="p-4">
+                <button class="w-full px-4 py-2 text-white bg-green-600 rounded-lg hover:bg-green-700">
+                    Records
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="flex-1 p-6 bg-gray-100">
+            <h2 class="mb-4 text-xl font-bold">Record Management</h2>
+            <div class="overflow-x-auto bg-white border rounded-lg shadow">
+                <table class="w-full table-auto">
+                    <thead>
+                        <tr class="text-left bg-gray-200">
+                            <th class="p-3 border">ID</th>
+                            <th class="p-3 border">Descriptor</th>
+                            <th class="p-3 border">Status</th>
+                            <th class="p-3 border">Context</th>
+                            <th class="p-3 border">Dates</th>
+                            <th class="p-3 border">Owner</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="border-t hover:bg-gray-50">
+                            <td class="p-3 border">001</td>
+                            <td class="p-3 border">Record A</td>
+                            <td class="p-3 border">Active</td>
+                            <td class="p-3 border">Context A</td>
+                            <td class="p-3 border">01/01/2023</td>
+                            <td class="p-3 border">John Doe</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>

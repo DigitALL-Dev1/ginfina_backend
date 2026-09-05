@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Record Management</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+    <div class="flex h-screen">
+        <!-- Sidebar -->
+        <div class="w-1/4 bg-white shadow-lg">
+            <div class="p-4 border-b">
+                <h1 class="text-xl font-bold">GX1 Platform</h1>
+            </div>
+            <nav class="p-4">
+                <button class="w-full py-2 mt-4 text-white bg-green-500 rounded focus:outline-none hover:bg-green-600">
+                    Record Management
+                </button>
+            </nav>
+        </div>
+
+        <!-- Main Content -->
+        <div class="flex-1 p-6">
+            <h2 class="pb-4 text-2xl font-bold border-b">Record Management</h2>
+            <div class="mt-6 overflow-x-auto bg-white rounded-lg shadow-md">
+                <table class="w-full table-auto">
+                    <thead class="bg-gray-200 border-b">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-sm font-medium text-gray-700">ID</th>
+                            <th class="px-4 py-2 text-left text-sm font-medium text-gray-700">Descriptor</th>
+                            <th class="px-4 py-2 text-left text-sm font-medium text-gray-700">Status</th>
+                            <th class="px-4 py-2 text-left text-sm font-medium text-gray-700">Context</th>
+                            <th class="px-4 py-2 text-left text-sm font-medium text-gray-700">Dates</th>
+                            <th class="px-4 py-2 text-left text-sm font-medium text-gray-700">Owner</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        <tr>
+                            <td class="px-4 py-3 text-sm text-gray-900">001</td>
+                            <td class="px-4 py-3 text-sm text-gray-900">Record A</td>
+                            <td class="px-4 py-3 text-sm text-gray-900">Active</td>
+                            <td class="px-4 py-3 text-sm text-gray-900">Context A</td>
+                            <td class="px-4 py-3 text-sm text-gray-900">01/01/2023</td>
+                            <td class="px-4 py-3 text-sm text-gray-900">John</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <title>Data Entry</title>
+</head>
+<body class="font-sans antialiased bg-gray-100">
+    <div class="min-h-screen flex">
+        <aside class="bg-white w-64 border-r">
+            <div class="p-6 text-lg font-semibold text-gray-900">GX1 Platform</div>
+            <nav class="p-6">
+                <a href="#" class="block w-full bg-green-500 text-white rounded p-2 text-center">Data Entry</a>
+            </nav>
+        </aside>
+        <main class="flex-1 p-6">
+            <div class="bg-white border rounded shadow p-6">
+                <div class="text-lg font-semibold border-b pb-4 mb-4">Data Entry</div>
+                <form class="space-y-4">
+                    <div>
+                        <label class="block text-gray-700">Field 1 *</label>
+                        <input type="text" class="w-full mt-1 p-2 border rounded focus:outline-none focus:ring focus:ring-green-100">
+                    </div>
+                    <div>
+                        <label class="block text-gray-700">Field 2 *</label>
+                        <input type="text" class="w-full mt-1 p-2 border rounded focus:outline-none focus:ring focus:ring-green-100">
+                    </div>
+                    <div>
+                        <label class="block text-gray-700">Field 3 *</label>
+                        <input type="text" class="w-full mt-1 p-2 border rounded focus:outline-none focus:ring focus:ring-green-100">
+                    </div>
+                    <div class="text-red-600">Error: Please fill out all required fields.</div>
+                    <div>
+                        <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">Submit</button>
+                    </div>
+                </form>
+            </div>
+        </main>
+    </div>
+</body>
+</html>

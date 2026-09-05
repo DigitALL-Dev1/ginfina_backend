@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Responsive Registration Form</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-100 font-sans antialiased flex items-center justify-center h-screen">
+    <div class="bg-white shadow-lg rounded-lg w-11/12 max-w-4xl flex overflow-hidden">
+        <div class="w-1/4 bg-gray-200 p-6">
+            <h1 class="text-xl font-bold text-gray-800 mb-6">GX1 Platform</h1>
+            <button class="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded focus:outline-none">
+                User Registration
+            </button>
+        </div>
+        <div class="w-3/4 p-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-4 border-b">User Registration</h2>
+            <form class="space-y-4">
+                <div>
+                    <label for="username" class="block text-sm font-medium text-gray-700">Username *</label>
+                    <input type="text" id="username" name="username" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm focus:ring-green-500 focus:border-green-500 sm:text-sm" placeholder="Enter username">
+                </div>
+                <div>
+                    <label for="email" class="block text-sm font-medium text-gray-700">Email *</label>
+                    <input type="email" id="email" name="email" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm focus:ring-green-500 focus:border-green-500 sm:text-sm" placeholder="Enter email">
+                </div>
+                <div>
+                    <label for="password" class="block text-sm font-medium text-gray-700">Password *</label>
+                    <input type="password" id="password" name="password" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm focus:ring-green-500 focus:border-green-500 sm:text-sm" placeholder="Enter password">
+                </div>
+                <div class="text-red-500 text-sm">
+                    Error: Email already in use.
+                </div>
+                <div>
+                    <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded focus:outline-none focus:ring-2 focus:ring-green-500">
+                        Register
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</body>
+
+</html>

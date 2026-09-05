@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <title>Record Management</title>
+</head>
+<body class="bg-gray-100">
+
+    <div class="min-h-screen flex">
+        <!-- Sidebar -->
+        <div class="w-64 bg-white border-r border-gray-200">
+            <div class="p-4">
+                <h1 class="text-lg font-bold text-gray-700">GX1 Platform</h1>
+            </div>
+            <nav class="mt-2">
+                <button class="w-full text-left p-2 text-white bg-green-500 rounded-lg focus:outline-none focus:bg-green-600">
+                    Records
+                </button>
+            </nav>
+        </div>
+        
+        <!-- Main Content -->
+        <div class="flex-1 p-4">
+            <div class="bg-white border-b border-gray-200 p-4">
+                <h2 class="text-lg font-bold text-gray-700">Record Management</h2>
+            </div>
+            <div class="mt-4 p-6 bg-white rounded-lg shadow-md">
+                <form>
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700" for="record-id">Record ID</label>
+                        <input type="text" id="record-id" class="w-full mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring focus:border-blue-300" />
+                    </div>
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium text-gray-700" for="status">Status</label>
+                        <input type="text" id="status" class="w-full mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring focus:border-blue-300" />
+                    </div>
+                    <button type="submit" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:outline-none focus:bg-green-700">
+                        Activate
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
