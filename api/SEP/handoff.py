@@ -10,6 +10,9 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
+import hashlib
+import json
 import os
 from uuid import uuid4
 
@@ -32,6 +35,8 @@ seb_releases = db["seb_release"]
 seb_revisions = db["seb_revision"]
 seb_baselines = db["seb_baseline"]
 seb_items = db["seb_item"]
+projects = db["ginfina_project"]
+ewb_frozen_items = db["seb_ewp_frozen_item"]
 
 # ============================================================
 # PYDANTIC MODELS
@@ -62,6 +67,24 @@ class SEBEWBHandoffResponse(SEBEWBHandoffCreate):
 class SEBEWBHandoffReviewCreate(BaseModel):
     reviewed_by: str
     review_comment: Optional[str] = None
+
+
+class SEBEWBFreezeCreate(BaseModel):
+    frozen_by: Optional[str] = None
+
+
+class SEBEWBFreezeResponse(BaseModel):
+    id: str
+    ewb_handoff_id: str
+    project: Dict[str, Any]
+    seb: Dict[str, Any]
+    released_revision: Dict[str, Any]
+    released_seb_items: List[Dict[str, Any]]
+    item_count: int
+    status: str
+    frozen_at: str
+    frozen_by: Optional[str] = None
+    snapshot_hash: str
 
 # ── SEB EWB Handoff Item ────────────────────────────────────
 class SEBEWBHandoffItemCreate(BaseModel):
@@ -160,6 +183,92 @@ async def find_by_id(collection, document_id: Optional[str]):
         candidates.append(ObjectId(document_id))
     return await collection.find_one({"_id": {"$in": candidates}})
 
+
+def json_safe(value: Any) -> Any:
+    """Convert MongoDB values into stable JSON values for hashing and responses."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, ObjectId):
+        return str(value)
+    if isinstance(value, dict):
+        return {key: json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [json_safe(item) for item in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def first_present(document: dict, fields: List[str]):
+    """Return the first useful value from a source fact document."""
+    for field in fields:
+        value = document.get(field)
+        if value is not None and (not isinstance(value, str) or value.strip()):
+            return value.strip() if isinstance(value, str) else value
+    return None
+
+
+async def build_frozen_item(item: dict, frozen_reference: dict, position: int) -> dict:
+    """Resolve an SEB item and copy the source fact values into the handoff snapshot."""
+    fact_id = item.get("fact_id") or frozen_reference.get("fact_id")
+    collection_name = item.get("fact_collection") or frozen_reference.get("fact_collection")
+    fact = {}
+    if fact_id and collection_name:
+        fact = await find_by_id(db[collection_name], str(fact_id)) or {}
+
+    item_name = first_present(item, ["fact_name", "item_name"])
+    if not item_name:
+        item_name = first_present(fact, [
+            "fact_name", "item_name", "parameter_name", "equipment_name",
+            "asset_name", "component_name", "name", "title", "description",
+            "finding", "observation",
+        ])
+    item_value = first_present(item, ["item_value", "fact_value", "value"])
+    if item_value is None:
+        item_value = first_present(fact, [
+            "fact_value", "item_value", "parameter_value", "accepted_value",
+            "measurement_value", "response_value", "output_value", "value",
+            "capacity", "rating",
+        ])
+    unit = first_present(item, ["unit"]) or first_present(fact, ["unit", "uom", "measurement_unit"])
+    item_code = first_present(item, ["item_code", "fact_code"])
+    if not item_code:
+        item_code = first_present(fact, ["item_code", "fact_code", "parameter_code", "code"])
+    item_code = str(item_code or f"Item {position:03d}")
+    item_name = str(item_name or f"Fact {fact_id or item['_id']}")
+    safe_value = json_safe(item_value)
+    display_value = item_name
+    if safe_value is not None:
+        display_value = f"{item_name} = {safe_value}{f' {unit}' if unit else ''}"
+
+    readiness = item.get("discipline_readiness") or frozen_reference.get("readiness")
+    return {
+        "seb_item_id": str(item["_id"]),
+        "item_code": item_code,
+        "fact_id": str(fact_id) if fact_id is not None else None,
+        "fact_collection": collection_name,
+        "item_name": item_name,
+        "item_value": safe_value,
+        "unit": str(unit) if unit is not None else None,
+        "display_value": display_value,
+        "discipline": item.get("review_discipline") or item.get("discipline") or fact.get("discipline") or fact.get("target_discipline"),
+        "review_decision": item.get("decision") or frozen_reference.get("review_decision"),
+        "readiness": json_safe(readiness),
+        "source_reference": {
+            "collection": collection_name,
+            "record_id": str(fact_id) if fact_id is not None else None,
+        },
+    }
+
+
+async def init_handoff_collections():
+    """Create indexes that enforce one immutable freeze snapshot per handoff."""
+    await ewb_frozen_items.create_index("ewb_handoff_id", unique=True)
+    await ewb_frozen_items.create_index("project.id")
+    await ewb_frozen_items.create_index("seb.id")
+    await ewb_frozen_items.create_index("released_revision.id")
+    await ewb_frozen_items.create_index("status")
+
 # ============================================================
 # EWB HANDOFF ENDPOINTS
 # ============================================================
@@ -242,6 +351,135 @@ async def complete_handoff_review(handoff_id: str, review: SEBEWBHandoffReviewCr
         }},
     )
     return serialize_doc(await ewb_handoffs.find_one({"_id": handoff_id}))
+
+
+@router.post(
+    "/ewb-handoffs/{handoff_id}/freeze",
+    response_model=SEBEWBFreezeResponse,
+    status_code=201,
+)
+async def freeze_released_seb_items(handoff_id: str, request: SEBEWBFreezeCreate):
+    """Create the immutable released-SEB snapshot used by an EWP handoff."""
+    existing = await ewb_frozen_items.find_one({"ewb_handoff_id": handoff_id})
+    if existing:
+        return serialize_doc(existing)
+
+    handoff = await find_by_id(ewb_handoffs, handoff_id)
+    if not handoff:
+        raise HTTPException(status_code=404, detail="EWB handoff not found")
+
+    release = await find_by_id(seb_releases, handoff.get("seb_release_id"))
+    if not release:
+        raise HTTPException(status_code=404, detail="SEB release not found")
+    if release.get("release_status") != "RELEASED":
+        raise HTTPException(status_code=409, detail="Only a RELEASED SEB can be frozen for EWP handoff")
+
+    revision_id = handoff.get("seb_revision_id")
+    revision = await find_by_id(seb_revisions, revision_id)
+    if not revision:
+        raise HTTPException(status_code=404, detail="Released SEB revision not found")
+    if revision.get("revision_status") != "RELEASED":
+        raise HTTPException(status_code=409, detail="The selected SEB revision is not RELEASED")
+    if str(release.get("seb_revision_id")) != str(revision_id):
+        raise HTTPException(status_code=409, detail="The release does not belong to the handoff revision")
+
+    release_snapshot = release.get("frozen_snapshot") or {}
+    seb_id = release_snapshot.get("seb_id") or revision.get("seb_id")
+    baseline = await find_by_id(seb_baselines, seb_id)
+    if not baseline:
+        raise HTTPException(status_code=404, detail="SEB baseline not found")
+
+    project_id = handoff.get("project_id") or baseline.get("project_id")
+    if handoff.get("project_id") and baseline.get("project_id") and str(handoff["project_id"]) != str(baseline["project_id"]):
+        raise HTTPException(status_code=409, detail="The handoff project does not match the released SEB project")
+    project = await find_by_id(projects, project_id) if project_id else None
+
+    frozen_references = release_snapshot.get("items") or []
+    reference_by_id = {
+        str(reference.get("seb_item_id")): reference
+        for reference in frozen_references
+        if reference.get("seb_item_id") is not None
+    }
+    released_item_ids = [str(item_id) for item_id in (release_snapshot.get("item_ids") or reference_by_id.keys())]
+
+    if released_item_ids:
+        item_candidates: List[Any] = list(released_item_ids)
+        item_candidates.extend(ObjectId(item_id) for item_id in released_item_ids if ObjectId.is_valid(item_id))
+        item_docs = await seb_items.find({
+            "_id": {"$in": item_candidates},
+            "seb_revision_id": revision_id,
+        }).to_list(length=5000)
+        item_by_id = {str(item["_id"]): item for item in item_docs}
+        missing_ids = [item_id for item_id in released_item_ids if item_id not in item_by_id]
+        if missing_ids:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{len(missing_ids)} released SEB item(s) could not be resolved",
+            )
+        ordered_items = [item_by_id[item_id] for item_id in released_item_ids]
+    else:
+        ordered_items = await seb_items.find({
+            "seb_id": seb_id,
+            "seb_revision_id": revision_id,
+            "status": {"$in": ["reviewed", "approved"]},
+        }).to_list(length=5000)
+
+    if not ordered_items:
+        raise HTTPException(status_code=409, detail="The released revision has no SEB items to freeze")
+
+    released_items = []
+    for position, item in enumerate(ordered_items, start=1):
+        reference = reference_by_id.get(str(item["_id"]), {})
+        released_items.append(await build_frozen_item(item, reference, position))
+
+    frozen_at = datetime.utcnow().isoformat()
+    snapshot = {
+        "ewb_handoff_id": str(handoff["_id"]),
+        "project": {
+            "id": str(project_id) if project_id is not None else None,
+            "code": (project or {}).get("project_code"),
+            "name": (project or {}).get("project_name") or str(project_id or "Unknown project"),
+        },
+        "seb": {
+            "id": str(seb_id),
+            "code": baseline.get("seb_code") or str(seb_id),
+        },
+        "released_revision": {
+            "id": str(revision_id),
+            "revision_no": revision.get("revision_no") or release_snapshot.get("revision_no"),
+            "release_id": str(release["_id"]),
+            "release_code": release.get("release_code"),
+            "release_hash": release.get("release_hash"),
+            "released_at": json_safe(release.get("released_at")),
+        },
+        "released_seb_items": released_items,
+        "item_count": len(released_items),
+        "status": "RELEASED",
+        "frozen_at": frozen_at,
+        "frozen_by": request.frozen_by,
+    }
+    canonical_snapshot = json.dumps(snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    snapshot["snapshot_hash"] = hashlib.sha256(canonical_snapshot.encode("utf-8")).hexdigest()
+    freeze_doc = {"_id": str(uuid4()), **snapshot}
+
+    try:
+        await ewb_frozen_items.insert_one(freeze_doc)
+    except DuplicateKeyError:
+        existing = await ewb_frozen_items.find_one({"ewb_handoff_id": handoff_id})
+        if existing:
+            return serialize_doc(existing)
+        raise
+
+    await ewb_handoffs.update_one(
+        {"_id": handoff["_id"]},
+        {"$set": {
+            "freeze_snapshot_id": freeze_doc["_id"],
+            "freeze_snapshot_hash": freeze_doc["snapshot_hash"],
+            "freeze_status": "RELEASED",
+            "frozen_at": frozen_at,
+        }},
+    )
+    return serialize_doc(freeze_doc)
 
 # ============================================================
 # HANDOFF ITEM ENDPOINTS

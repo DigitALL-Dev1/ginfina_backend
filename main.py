@@ -16,7 +16,7 @@ from api.SEP.readiness_conditions import router as readiness_router, init_readin
 from api.SEP.revision_change import router as revision_change_router, init_revision_change_collections
 from api.SEP.approval_release import router as approval_release_router, init_approval_release_collections
 from api.SEP.impact_assessment import router as impact_assessment_router
-from api.SEP.handoff import router as handoff_router
+from api.SEP.handoff import router as handoff_router, init_handoff_collections
 from api.crm import router as crm_router
 from pathlib import Path
 
@@ -39,6 +39,7 @@ async def startup_event():
     await init_readiness_collections()
     await init_revision_change_collections()
     await init_approval_release_collections()
+    await init_handoff_collections()
     print("Database initialized successfully")
 
 app.add_middleware(
