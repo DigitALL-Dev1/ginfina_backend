@@ -36,6 +36,7 @@ seb_revisions = db["seb_revision"]
 seb_baselines = db["seb_baseline"]
 seb_items = db["seb_item"]
 projects = db["ginfina_project"]
+sia_cases = db["sia_case"]
 ewb_frozen_items = db["seb_ewp_frozen_item"]
 
 # ============================================================
@@ -76,6 +77,9 @@ class SEBEWBFreezeCreate(BaseModel):
 class SEBEWBFreezeResponse(BaseModel):
     id: str
     ewb_handoff_id: str
+    sia_case_id: Optional[str] = None
+    project_id: Optional[str] = None
+    sia_case: Optional[Dict[str, Any]] = None
     project: Dict[str, Any]
     seb: Dict[str, Any]
     released_revision: Dict[str, Any]
@@ -264,6 +268,8 @@ async def build_frozen_item(item: dict, frozen_reference: dict, position: int) -
 async def init_handoff_collections():
     """Create indexes that enforce one immutable freeze snapshot per handoff."""
     await ewb_frozen_items.create_index("ewb_handoff_id", unique=True)
+    await ewb_frozen_items.create_index("sia_case_id")
+    await ewb_frozen_items.create_index("project_id")
     await ewb_frozen_items.create_index("project.id")
     await ewb_frozen_items.create_index("seb.id")
     await ewb_frozen_items.create_index("released_revision.id")
@@ -361,8 +367,6 @@ async def complete_handoff_review(handoff_id: str, review: SEBEWBHandoffReviewCr
 async def freeze_released_seb_items(handoff_id: str, request: SEBEWBFreezeCreate):
     """Create the immutable released-SEB snapshot used by an EWP handoff."""
     existing = await ewb_frozen_items.find_one({"ewb_handoff_id": handoff_id})
-    if existing:
-        return serialize_doc(existing)
 
     handoff = await find_by_id(ewb_handoffs, handoff_id)
     if not handoff:
@@ -389,10 +393,53 @@ async def freeze_released_seb_items(handoff_id: str, request: SEBEWBFreezeCreate
     if not baseline:
         raise HTTPException(status_code=404, detail="SEB baseline not found")
 
-    project_id = handoff.get("project_id") or baseline.get("project_id")
-    if handoff.get("project_id") and baseline.get("project_id") and str(handoff["project_id"]) != str(baseline["project_id"]):
-        raise HTTPException(status_code=409, detail="The handoff project does not match the released SEB project")
-    project = await find_by_id(projects, project_id) if project_id else None
+    sia_case_id = baseline.get("sia_case_id")
+    if not sia_case_id:
+        raise HTTPException(status_code=409, detail="The released SEB does not reference an SIA case")
+    sia_case = await find_by_id(sia_cases, sia_case_id)
+    if not sia_case:
+        raise HTTPException(status_code=404, detail="The SIA case referenced by the SEB was not found")
+    project_id = sia_case.get("project_id")
+    if not project_id:
+        raise HTTPException(status_code=409, detail="The SIA case does not reference a project")
+    project = await find_by_id(projects, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="The project referenced by the SIA case was not found")
+
+    if baseline.get("project_id") and str(baseline["project_id"]) != str(project_id):
+        raise HTTPException(status_code=409, detail="The SEB project does not match its SIA case project")
+    if handoff.get("project_id") and str(handoff["project_id"]) != str(project_id):
+        raise HTTPException(status_code=409, detail="The handoff project does not match the SIA case project")
+
+    if existing:
+        stored_sia_case_id = existing.get("sia_case_id")
+        stored_project_id = existing.get("project_id")
+        if stored_sia_case_id and str(stored_sia_case_id) != str(sia_case_id):
+            raise HTTPException(status_code=409, detail="The existing freeze references a different SIA case")
+        if stored_project_id and str(stored_project_id) != str(project_id):
+            raise HTTPException(status_code=409, detail="The existing freeze references a different project")
+        if not stored_sia_case_id or not stored_project_id:
+            metadata = {
+                "sia_case_id": str(sia_case_id),
+                "project_id": str(project_id),
+                "sia_case": {"id": str(sia_case_id), "case_code": sia_case.get("case_code")},
+                "project": {
+                    "id": str(project_id),
+                    "code": project.get("project_code"),
+                    "name": project.get("project_name"),
+                },
+            }
+            hash_payload = {
+                key: json_safe(value)
+                for key, value in existing.items()
+                if key not in {"_id", "snapshot_hash"}
+            }
+            hash_payload.update(metadata)
+            canonical_snapshot = json.dumps(hash_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            metadata["snapshot_hash"] = hashlib.sha256(canonical_snapshot.encode("utf-8")).hexdigest()
+            await ewb_frozen_items.update_one({"_id": existing["_id"]}, {"$set": metadata})
+            existing.update(metadata)
+        return serialize_doc(existing)
 
     frozen_references = release_snapshot.get("items") or []
     reference_by_id = {
@@ -435,10 +482,16 @@ async def freeze_released_seb_items(handoff_id: str, request: SEBEWBFreezeCreate
     frozen_at = datetime.utcnow().isoformat()
     snapshot = {
         "ewb_handoff_id": str(handoff["_id"]),
+        "sia_case_id": str(sia_case_id),
+        "project_id": str(project_id),
+        "sia_case": {
+            "id": str(sia_case_id),
+            "case_code": sia_case.get("case_code"),
+        },
         "project": {
-            "id": str(project_id) if project_id is not None else None,
-            "code": (project or {}).get("project_code"),
-            "name": (project or {}).get("project_name") or str(project_id or "Unknown project"),
+            "id": str(project_id),
+            "code": project.get("project_code"),
+            "name": project.get("project_name"),
         },
         "seb": {
             "id": str(seb_id),
