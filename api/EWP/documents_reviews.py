@@ -136,8 +136,12 @@ async def document_detail(document: dict) -> dict:
         "revision_id": document.get("current_revision_id"),
     }).sort("created_at", 1).to_list(length=1000)
     comments = await comment_collection.find({"document_id": document_id}).sort("created_at", 1).to_list(length=1000)
+    current_revision = next((row for row in revisions if str(row["_id"]) == str(document.get("current_revision_id"))), None)
     return {
         **serialize(document),
+        # The document status is a projection and can be stale. Display the
+        # current revision's actual workflow state without altering its records.
+        "status": current_revision.get("status") if current_revision else "REVISION_MISSING",
         "revisions": [serialize(item) for item in revisions],
         "reviewers": [serialize(item) for item in reviewers],
         "comments": [serialize(item) for item in comments],
@@ -169,7 +173,11 @@ async def get_review_ready_deliverables():
 async def get_deliverable_documents(deliverable_id: str):
     await require_deliverable(deliverable_id)
     documents = await document_collection.find({"deliverable_id": deliverable_id}).sort("created_at", 1).to_list(length=1000)
-    return [serialize(document) for document in documents]
+    result = []
+    for document in documents:
+        current = await revision_collection.find_one({"_id": document.get("current_revision_id"), "document_id": str(document["_id"])})
+        result.append({**serialize(document), "status": current.get("status") if current else "REVISION_MISSING"})
+    return result
 
 
 @router.post(

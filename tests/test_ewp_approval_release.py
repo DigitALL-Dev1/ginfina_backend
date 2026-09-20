@@ -231,6 +231,21 @@ class ApprovalReleaseTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException):
             await docs.respond_to_review_comment("comment", docs.CommentResponseUpdate(response="Overwrite D03"))
 
+    async def test_document_views_use_current_revision_status_without_rewriting_records(self):
+        self.db["ewp_document"].rows["doc"]["status"] = "RELEASED"
+        self.db["ewp_deliverable"].rows["deliverable"]["status"] = "READY_FOR_REVIEW"
+        detail = await docs.get_document("doc")
+        listing = await docs.get_deliverable_documents("deliverable")
+        self.assertEqual(detail["status"], "REVIEW_COMPLETED")
+        self.assertEqual(listing[0]["status"], "REVIEW_COMPLETED")
+        self.assertEqual(self.db["ewp_document"].rows["doc"]["status"], "RELEASED")
+        self.assertNotIn("release_record", self.db["ewp_document_revision"].rows["d03"])
+        self.db["ewp_document"].rows["doc"]["status"] = "REVIEW_COMPLETED"
+        await self.approve()
+        await self.release()
+        self.assertEqual((await docs.get_document("doc"))["status"], "RELEASED")
+        self.assertEqual((await docs.get_deliverable_documents("deliverable"))[0]["status"], "RELEASED")
+
     async def test_released_revision_all_review_mutations_are_blocked(self):
         await self.approve()
         await self.release()

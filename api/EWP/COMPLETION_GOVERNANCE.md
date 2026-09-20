@@ -21,7 +21,9 @@ its old resolution; no manual override exists for failed engineering checks.
 
 ## Gates and status
 
-- Required engineering work must be `COMPLETED`; `READY_FOR_OUTPUT` is insufficient.
+- Each required engineering activity must be `READY_FOR_OUTPUT` or `COMPLETED`,
+  matching the Module 1 handoff. The EWP's overall status does not override an
+  unfinished activity. Deliverable release and procurement remain separate gates.
 - Mandatory deliverables need released current document revisions. Deliverable
   preparation status is not used as a substitute for the controlled release.
 - Current revision reviewers must have completed an accepting decision; all

@@ -97,7 +97,7 @@ class CompletionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(response.json()["blockers"]), 5)
 
     async def test_each_source_gate_blocks_closure(self):
-        cases = [("ewp_engineering_work", "work", "status", "READY_FOR_OUTPUT", "work"),
+        cases = [("ewp_engineering_work", "work", "status", "IN_PROGRESS", "work"),
                  ("ewp_document_review_comment", "comment", "status", "OPEN", "comments"),
                  ("ewp_document_reviewer", "reviewer", "decision", "CHANGE_REQUIRED", "reviews"),
                  ("ewp_document_revision", "d03", "status", "UNDER_REVIEW", "releases"),
@@ -111,6 +111,83 @@ class CompletionTests(unittest.IsolatedAsyncioTestCase):
                 await self.post("submit", expected=409)
                 await self.post("close", expected=409)
                 record[key] = old
+
+    async def test_ready_for_output_activities_allow_closure_when_other_gates_pass(self):
+        self.db["ewp"].rows["ewp"]["status"] = "READY_FOR_OUTPUT"
+        self.db["ewp_engineering_work"].rows["work"]["status"] = "READY_FOR_OUTPUT"
+        self.db["ewp_engineering_work"].rows["work2"] = {
+            "_id": "work2", "ewp_id": "ewp", "status": "COMPLETED", "work_code": "EWO-002"
+        }
+        result = await self.get()
+        self.assertEqual(next(c for c in result["checks"] if c["id"] == "work")["status"], "PASSED")
+        await self.post("governance")
+        await self.post("submit")
+        self.assertEqual((await self.post("close"))["completion_status"], "CLOSED")
+
+    async def test_ready_package_does_not_override_unfinished_activity(self):
+        self.db["ewp"].rows["ewp"]["status"] = "READY_FOR_OUTPUT"
+        for status in ["DRAFT", "NOT_STARTED", "IN_PROGRESS", "ON_HOLD"]:
+            with self.subTest(status=status):
+                self.db["ewp_engineering_work"].rows["work"]["status"] = status
+                result = await self.get()
+                self.assertIn("work", [c["id"] for c in result["blockers"]])
+                await self.post("close", expected=409)
+
+    async def test_ready_for_output_preserves_release_procurement_and_condition_gates(self):
+        self.db["ewp_engineering_work"].rows["work"]["status"] = "READY_FOR_OUTPUT"
+        self.db["ewp_document_revision"].rows["d03"]["status"] = "READY_FOR_RELEASE"
+        self.db["ewp_quantity_register"].rows["reg"]["handoff"]["status"] = "SENT"
+        item = self.db["seb_ewp_frozen_item"].rows["freeze"]["released_seb_items"][0]
+        item["readiness"] = {"status": "CONDITIONAL", "conditional": {"enabled": True, "condition": "Verify loading"}}
+        result = await self.get()
+        blockers = {c["id"] for c in result["blockers"]}
+        self.assertNotIn("work", blockers)
+        self.assertTrue({"deliverables", "releases", "procurement", "conditions"}.issubset(blockers))
+        await self.post("submit", expected=409)
+        await self.post("close", expected=409)
+
+    async def test_released_document_label_does_not_replace_missing_revision_release(self):
+        self.db["ewp_document"].rows["doc"]["status"] = "RELEASED"
+        revision = self.db["ewp_document_revision"].rows["d03"]
+        revision["status"] = "REVIEW_COMPLETED"
+        revision.pop("approval")
+        revision.pop("release_record")
+        result = await self.get()
+        release_check = next(c for c in result["checks"] if c["id"] == "releases")
+        self.assertEqual(release_check["status"], "FAILED")
+        self.assertIn("SLD / D03", release_check["issues"][0])
+        self.assertIn("REVIEW_COMPLETED", release_check["issues"][0])
+        self.assertIn("Approval & Release", release_check["issues"][0])
+        deliverable_check = next(c for c in result["checks"] if c["id"] == "deliverables")
+        self.assertIn(release_check["issues"][0], deliverable_check["issues"][0])
+        await self.post("close", expected=409)
+
+    async def test_released_revision_requires_its_own_release_record(self):
+        self.db["ewp_document_revision"].rows["d03"].pop("release_record")
+        result = await self.get()
+        self.assertTrue({"deliverables", "releases"}.issubset({c["id"] for c in result["blockers"]}))
+        self.assertIn("controlled release record is missing", next(c for c in result["checks"] if c["id"] == "releases")["issues"][0])
+
+    async def test_procurement_warning_names_current_status_and_next_step(self):
+        handoff = self.db["ewp_quantity_register"].rows["reg"]["handoff"]
+        for status, next_status in [("REFERENCED", "SENT"), ("SENT", "ACKNOWLEDGED"), ("ACKNOWLEDGED", "IN_PROGRESS"), ("IN_PROGRESS", "COMPLETED")]:
+            with self.subTest(status=status):
+                handoff["status"] = status
+                result = await self.get()
+                check = next(c for c in result["checks"] if c["id"] == "procurement")
+                self.assertEqual(check["status"], "FAILED")
+                self.assertIn(f"status is {status}, not COMPLETED", check["issues"][0])
+                self.assertIn(f"next status is {next_status}", check["issues"][0])
+        handoff["status"] = "COMPLETED"
+        self.assertEqual(next(c for c in (await self.get())["checks"] if c["id"] == "procurement")["status"], "PASSED")
+
+    async def test_completed_procurement_still_requires_reference_and_current_boq(self):
+        handoff = self.db["ewp_quantity_register"].rows["reg"]["handoff"]
+        handoff.update(reference="", boq_id="old-boq")
+        check = next(c for c in (await self.get())["checks"] if c["id"] == "procurement")
+        self.assertEqual(check["status"], "FAILED")
+        self.assertTrue(any("reference is missing" in issue for issue in check["issues"]))
+        self.assertTrue(any("current BOQ" in issue for issue in check["issues"]))
 
     async def test_new_current_revision_does_not_reuse_old_release(self):
         self.db["ewp_document_revision"].rows["d04"] = {"_id": "d04", "document_id": "doc", "status": "DRAFT"}

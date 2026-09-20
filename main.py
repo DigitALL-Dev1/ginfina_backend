@@ -22,6 +22,7 @@ from api.EWP.inputs_deliverables import router as ewp_inputs_deliverables_router
 from api.EWP.documents_reviews import router as ewp_documents_reviews_router
 from api.EWP.approval_release import router as ewp_approval_release_router
 from api.EWP.quantities_procurement import router as ewp_quantities_procurement_router
+from api.EWP.management_administration import router as ewp_management_administration_router
 from api.EWP.lifecycle import ensure_ewp_open
 from api.EWP.completion_governance import router as ewp_completion_governance_router
 from api.crm import router as crm_router
@@ -67,6 +68,7 @@ app.include_router(ewp_documents_reviews_router, prefix="/api", dependencies=[De
 app.include_router(ewp_approval_release_router, prefix="/api", dependencies=[Depends(ensure_ewp_open)], tags=["EWP - Approval & Release"])
 app.include_router(ewp_quantities_procurement_router, prefix="/api", dependencies=[Depends(ensure_ewp_open)], tags=["EWP - Quantities & Procurement"])
 app.include_router(ewp_completion_governance_router, prefix="/api", tags=["EWP - Completion & Governance"])
+app.include_router(ewp_management_administration_router, prefix="/api", tags=["EWP - Management & Administration"])
 app.include_router(crm_router, prefix="/api", tags=["CRM"])
 
 @app.get("/")

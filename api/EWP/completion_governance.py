@@ -106,16 +106,39 @@ async def summary(ewp):
             "issues": issues})
     def label(row):
         return row.get("work_code") or row.get("code") or row.get("document_code") or row.get("name") or str(row["_id"])
+    def release_issue(doc):
+        rev = revision_by_id.get(doc.get("current_revision_id"), {})
+        name = f"{label(doc)} / {rev.get('revision_no') or doc.get('current_revision_no') or 'current revision'}"
+        if not rev or rev.get("document_id") != doc["_id"]:
+            return f"{name}: current document revision is missing"
+        if rev.get("status") != "RELEASED":
+            return f"{name}: revision status is {rev.get('status', 'unknown')}; complete approval and release in Approval & Release"
+        release = rev.get("release_record") or {}
+        approval = rev.get("approval") or {}
+        if not release:
+            return f"{name}: controlled release record is missing despite the RELEASED status"
+        if release.get("status") != "RELEASED" or release.get("revision_id") != rev["_id"] or release.get("ewp_id") != eid:
+            return f"{name}: release record does not match this EWP and released revision"
+        if approval.get("decision") not in {"APPROVE", "APPROVE_WITH_CONDITION"}:
+            return f"{name}: approval decision is missing for this released revision"
+        return None
+    release_issues = {doc["_id"]: release_issue(doc) for doc in docs}
     required_work = [w for w in work if w.get("mandatory", True)]
-    check("work", "ENGINEERING_WORK", "Required engineering work completed",
-          [f"{label(w)}: {w.get('status', 'unknown')}" for w in required_work if w.get("status") != "COMPLETED"]
+    # Module 1 hands activities to the output workflow at READY_FOR_OUTPUT.
+    # Deliverable release and procurement completion have their own gates below.
+    check("work", "ENGINEERING_WORK", "Required engineering work ready for output or completed",
+          [f"{label(w)}: {w.get('status', 'unknown')} (must be READY_FOR_OUTPUT or COMPLETED)"
+           for w in required_work if w.get("status") not in {"READY_FOR_OUTPUT", "COMPLETED"}]
           + ([] if required_work else ["No required engineering work recorded"]), len(required_work))
     required_deliverables = [d for d in deliverables if d.get("mandatory", True)]
     deliverable_issues = []
     for d in required_deliverables:
         linked = [doc for doc in docs if doc.get("deliverable_id") == d["_id"]]
-        if not linked or any(revision_by_id.get(doc.get("current_revision_id"), {}).get("status") != "RELEASED" for doc in linked):
-            deliverable_issues.append(f"{label(d)}: required document release incomplete")
+        if not linked:
+            deliverable_issues.append(f"{label(d)}: no engineering document recorded")
+        for doc in linked:
+            if release_issues[doc["_id"]]:
+                deliverable_issues.append(f"{label(d)}: {release_issues[doc['_id']]}")
     check("deliverables", "DELIVERABLES", "Mandatory deliverables released", deliverable_issues
           + ([] if required_deliverables else ["No mandatory deliverables recorded"]), len(required_deliverables))
     review_issues, approval_issues = [], []
@@ -133,10 +156,9 @@ async def summary(ewp):
         if rev.get("status") not in {"REVIEW_COMPLETED", "READY_FOR_RELEASE", "RELEASED"} or not assignments or any(
                 r.get("status") != "COMPLETED" or r.get("decision") not in {"ACCEPT", "ACCEPT_WITH_COMMENT"} for r in assignments):
             review_issues.append(f"{label(doc)}: current revision review incomplete")
-        release = rev.get("release_record") or {}
         approval = rev.get("approval") or {}
-        if rev.get("status") != "RELEASED" or release.get("status") != "RELEASED" or release.get("revision_id") != rev.get("_id") or release.get("ewp_id") != eid or approval.get("decision") not in {"APPROVE", "APPROVE_WITH_CONDITION"}:
-            approval_issues.append(f"{label(doc)}: approved release record missing for current revision")
+        if release_issues[doc["_id"]]:
+            approval_issues.append(release_issues[doc["_id"]])
         if approval.get("decision") == "APPROVE_WITH_CONDITION":
             obligation(f"approval:{rev['_id']}", "CONDITION", approval.get("condition") or "Approval condition requires resolution",
                        {"document_id": doc["_id"], "revision_id": rev["_id"], "approval": approval})
@@ -155,8 +177,17 @@ async def summary(ewp):
             if source_revision.get("status") != "RELEASED" or release.get("ewp_id") != eid or not source.get("release_id") or release.get("id") != source.get("release_id") or release.get("release_hash") != source.get("release_hash"):
                 quantity_issues.append(f"{label(reg)}: quantity source no longer matches its controlled release")
         handoff = reg.get("handoff") or {}
-        if handoff.get("status") != "COMPLETED" or handoff.get("boq_id") != boq.get("id") or not handoff.get("reference"):
-            procurement_issues.append(f"{label(reg)}: procurement handoff incomplete")
+        if not handoff:
+            procurement_issues.append(f"{label(reg)}: no procurement handoff recorded; record a reference in Quantities & Procurement")
+        else:
+            if not handoff.get("reference"):
+                procurement_issues.append(f"{label(reg)}: procurement handoff reference is missing")
+            if not boq.get("id") or handoff.get("boq_id") != boq["id"]:
+                procurement_issues.append(f"{label(reg)}: procurement handoff is not linked to the current BOQ / EBOM")
+            if handoff.get("status") != "COMPLETED":
+                next_status = {"REFERENCED": "SENT", "SENT": "ACKNOWLEDGED", "ACKNOWLEDGED": "IN_PROGRESS", "IN_PROGRESS": "COMPLETED"}.get(handoff.get("status"))
+                guidance = f"next status is {next_status}" if next_status else "resolve this handoff before closure"
+                procurement_issues.append(f"{label(reg)}: procurement handoff status is {handoff.get('status', 'unknown')}, not COMPLETED; {guidance} in Quantities & Procurement")
     check("quantities", "QUANTITIES", "BOQ / EBOM approved", quantity_issues + ([] if registers else ["No quantity register recorded"]), len(registers))
     check("procurement", "PROCUREMENT", "Procurement handoff completed", procurement_issues + ([] if registers else ["No procurement handoff recorded"]), len(registers))
     basis_issues = []
@@ -179,6 +210,14 @@ async def summary(ewp):
     check("basis", "CONDITIONS", "Frozen SEB basis available", basis_issues, len(links))
     for action in state.get("actions", []):
         obligation(action["id"], "ACTION", action["title"], action)
+    management = ewp.get("management_control") or {}
+    for group in ("actions", "issues", "risks"):
+        for item in management.get(group, []):
+            if group != "actions" and not item.get("blocking"):
+                continue
+            obligation(f"management:{group}:{item['id']}", "ACTION" if group == "actions" else "BLOCKER",
+                       f"Management {group[:-1]}: {item['title']}", item)
+            obligations[-1].update(managed_in="MANAGEMENT", status="CLOSED" if item.get("status") == "CLOSED" else "OPEN", resolution=None)
     for identity, kind, title in [("conditions", "CONDITION", "Conditions closed or formally accepted"), ("blockers", "BLOCKER", "No open blockers"), ("actions", "ACTION", "No outstanding actions")]:
         selected = [o for o in obligations if o["kind"] == kind]
         check(identity, "CONDITIONS" if kind != "ACTION" else "ACTIONS", title, [o["title"] for o in selected if o["status"] == "OPEN"], len(selected))
@@ -215,6 +254,8 @@ async def save(ewp, state, request, action, checks=None, ewp_status=None):
              "history": previous.get("history", []) + [{"id": str(uuid4()), "action": action,
                  "actor": request.actor, "comment": request.comment, "at": timestamp, "actor_mode": "PROTOTYPE_PILOT"}]}
     query = {"_id": ewp["_id"], "completion_control.version": previous["version"]} if previous["version"] else {"_id": ewp["_id"], "completion_control": {"$exists": False}}
+    management = ewp.get("management_control")
+    query.update({"management_control.version": management["version"]} if management else {"management_control": {"$exists": False}})
     patch = {"completion_control": state, "updated_at": timestamp}
     if ewp_status:
         patch["status"] = ewp_status
@@ -257,6 +298,8 @@ async def resolve_obligation(ewp_id: str, request: Resolution):
     obligation = next((o for o in result["obligations"] if o["id"] == request.obligation_id), None)
     if not obligation or obligation["source_hash"] != request.source_hash:
         raise HTTPException(409, "The source obligation changed or does not belong to this EWP")
+    if obligation.get("managed_in") == "MANAGEMENT":
+        raise HTTPException(409, "Resolve this record in Management & Administration")
     if request.status == "ACCEPTED" and obligation["kind"] != "CONDITION":
         raise HTTPException(400, "Actions and blockers must be closed; only conditions can be formally accepted")
     record = {**request.model_dump(exclude={"version"}), "at": documents.now_iso(), "actor_mode": "PROTOTYPE_PILOT"}
