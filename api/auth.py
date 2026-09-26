@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 from datetime import datetime, timedelta
@@ -8,13 +9,16 @@ import jwt
 from motor.motor_asyncio import AsyncIOMotorClient
 import uuid
 import os
-import random
+import secrets
+import logging
 import smtplib
+import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+load_dotenv(override=False)
+logger = logging.getLogger(__name__)
 
 # MongoDB Configuration
 MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
@@ -29,16 +33,12 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USERNAME = os.getenv("SMTP_USERNAME")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USERNAME or "noreply@gx1.com")
+SMTP_TIMEOUT_SECONDS = float(os.getenv("SMTP_TIMEOUT_SECONDS", "15"))
 
 def send_email(to_email: str, subject: str, body: str):
     if not SMTP_USERNAME or not SMTP_PASSWORD:
-        print("\n" + "="*50)
-        print(f"[MOCK EMAIL - CONFIGURE SMTP IN .env TO SEND REAL EMAILS]")
-        print(f"To: {to_email}")
-        print(f"Subject: {subject}")
-        print(f"Body: {body}")
-        print("="*50 + "\n")
-        return False
+        logger.error("auth.email.not_configured: SMTP_USERNAME or SMTP_PASSWORD is missing")
+        raise HTTPException(status_code=503, detail="Email delivery is not configured on the server. Contact your administrator.")
     try:
         msg = MIMEMultipart()
         msg['From'] = SMTP_FROM
@@ -46,15 +46,22 @@ def send_email(to_email: str, subject: str, body: str):
         msg['Subject'] = subject
         msg.attach(MIMEText(body, 'html' if "<html>" in body else 'plain'))
         
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.starttls()
+        context = ssl.create_default_context()
+        connection = (smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT_SECONDS, context=context)
+                      if SMTP_PORT == 465 else smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT_SECONDS))
+        with connection as server:
+            if SMTP_PORT != 465:
+                server.ehlo()
+                server.starttls(context=context)
+                server.ehlo()
             server.login(SMTP_USERNAME, SMTP_PASSWORD)
             server.send_message(msg)
-        print(f"Successfully sent email to {to_email}")
+        logger.info("auth.email.accepted: SMTP provider accepted the message")
         return True
-    except Exception as e:
-        print(f"Failed to send email to {to_email}: {e}")
-        return False
+    except (OSError, smtplib.SMTPException) as exc:
+        # Record the failure category, never the message body, code or credentials.
+        logger.error("auth.email.failed: %s (host=%s port=%s)", type(exc).__name__, SMTP_HOST, SMTP_PORT)
+        raise HTTPException(status_code=503, detail="Unable to send the email. Please try again or contact your administrator.") from exc
 
 async def init_db():
     """Initialize MongoDB collections and create indexes"""
@@ -144,6 +151,7 @@ class Token(BaseModel):
     token_type: str
     name: str
     user_id: str
+    role: str
 
 class User(BaseModel):
     id: str
@@ -186,7 +194,7 @@ def verify_token(token: str) -> str:
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
-        if email is None:
+        if email is None or payload.get("type") not in (None, "access"):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials"
@@ -218,6 +226,36 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         )
     return user
 
+def start_mfa_challenge(user: dict):
+    """Require email verification for every role before issuing an access token."""
+    # Generate random 6-digit code
+    code = f"{secrets.randbelow(1000000):06d}"
+    
+    # Send MFA code email
+    subject = "Your GINFINIA Sign-In Verification Code"
+    body = f"""
+    <html>
+        <body>
+            <h2>GINFINIA Access Verification</h2>
+            <p>Hello {user['name']},</p>
+            <p>A sign-in attempt was detected requiring Multi-Factor Authentication.</p>
+            <p>Your 6-digit verification code is: <strong>{code}</strong></p>
+            <p>This code is valid for 5 minutes.</p>
+            <br>
+            <p>Secure. Governed. Integrated.</p>
+        </body>
+    </html>
+    """
+    if not send_email(user["email"], subject, body):
+        raise HTTPException(status_code=503, detail="Unable to send the verification email. Please try again.")
+    
+    temp_token = create_temp_token(user["email"], code)
+    return {
+        "mfa_required": True,
+        "temp_token": temp_token,
+        "message": "MFA verification required. A 6-digit code has been sent to your email."
+    }
+
 # Authentication Endpoints
 
 @router.post("/login")
@@ -235,68 +273,33 @@ async def login(user_data: UserLogin):
             detail="Incorrect email/username or password"
         )
     
-    # Check if role requires MFA: Admin or External Consultant
-    if user["role"] in ["admin", "consultant"]:
-        # Generate random 6-digit code
-        code = f"{random.randint(100000, 999999)}"
-        
-        # Send MFA code email
-        subject = "Your GINFINIA Sign-In Verification Code"
-        body = f"""
-        <html>
-            <body>
-                <h2>GINFINIA Access Verification</h2>
-                <p>Hello {user['name']},</p>
-                <p>A sign-in attempt was detected requiring Multi-Factor Authentication.</p>
-                <p>Your 6-digit verification code is: <strong>{code}</strong></p>
-                <p>This code is valid for 5 minutes.</p>
-                <br>
-                <p>Secure. Governed. Integrated.</p>
-            </body>
-        </html>
-        """
-        send_email(user["email"], subject, body)
-        
-        temp_token = create_temp_token(user["email"], code)
-        return {
-            "mfa_required": True,
-            "temp_token": temp_token,
-            "message": "MFA verification required. A 6-digit code has been sent to your email."
-        }
-    
-    # Standard user login
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user["email"]}, 
-        expires_delta=access_token_expires
-    )
-    
-    return {
-        "access_token": access_token, 
-        "token_type": "bearer",
-        "name": user["name"],
-        "user_id": str(user["_id"])
-    }
+    return await run_in_threadpool(start_mfa_challenge, user)
 
 @router.post("/verify-mfa", response_model=Token)
 async def verify_mfa(mfa_data: VerifyMfaRequest):
     try:
         payload = jwt.decode(mfa_data.temp_token, SECRET_KEY, algorithms=[ALGORITHM])
-        if payload.get("type") != "mfa_temp":
+        if payload.get("type") != "mfa_temp" or not payload.get("sub") or not payload.get("code"):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid MFA session token"
             )
         email = payload.get("sub")
         correct_code = payload.get("code")
-    except jwt.PyJWTError:
+    except jwt.ExpiredSignatureError:
+        logger.info("auth.mfa.expired")
+        raise HTTPException(status_code=401, detail="Verification session expired. Sign in again to request a new code.")
+    except jwt.PyJWTError as exc:
+        logger.warning("auth.mfa.invalid_session: %s", type(exc).__name__)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="MFA session expired or invalid"
+            detail="Invalid verification session. Sign in again and use the newest email code."
         )
     
     # Verify the code
-    if mfa_data.code != correct_code:
+    supplied_code = mfa_data.code.strip()
+    if len(supplied_code) != 6 or not supplied_code.isascii() or not supplied_code.isdigit() or not secrets.compare_digest(supplied_code, str(correct_code)):
+        logger.info("auth.mfa.incorrect_code")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Incorrect verification code. Please check and try again."
@@ -319,7 +322,8 @@ async def verify_mfa(mfa_data: VerifyMfaRequest):
         "access_token": access_token, 
         "token_type": "bearer",
         "name": user["name"],
-        "user_id": str(user["_id"])
+        "user_id": str(user["_id"]),
+        "role": str(user.get("role", "")).strip().upper()
     }
 
 @router.post("/forgot-password")
@@ -356,7 +360,7 @@ async def forgot_password(reset_data: ForgotPasswordRequest):
         </body>
     </html>
     """
-    send_email(user["email"], subject, body)
+    await run_in_threadpool(send_email, user["email"], subject, body)
     
     return {
         "message": f"A password reset link has been successfully generated and sent to {reset_data.email}."
@@ -395,7 +399,7 @@ async def reset_password(reset_data: ResetPasswordRequest):
     
     return {"message": "Your password has been successfully updated."}
 
-@router.post("/google-login", response_model=Token)
+@router.post("/google-login")
 async def google_login(google_data: GoogleLoginRequest):
     email = "google_user@gx1.com"
     user = await get_user_by_email_or_username(email)
@@ -415,18 +419,7 @@ async def google_login(google_data: GoogleLoginRequest):
         await users_collection.insert_one(new_user)
         user = await get_user_by_email_or_username(email)
         
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user["email"]}, 
-        expires_delta=access_token_expires
-    )
-    
-    return {
-        "access_token": access_token, 
-        "token_type": "bearer",
-        "name": user["name"],
-        "user_id": str(user["_id"])
-    }
+    return await run_in_threadpool(start_mfa_challenge, user)
 
 @router.get("/me", response_model=User)
 async def get_current_user_info(current_user: dict = Depends(get_current_user)):
