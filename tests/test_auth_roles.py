@@ -3,6 +3,7 @@ import importlib.util
 import unittest
 import re
 import smtplib
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -17,6 +18,10 @@ class AuthenticationRolesTest(unittest.IsolatedAsyncioTestCase):
         # Import without opening a database connection or loading application secrets.
         with patch('dotenv.load_dotenv'), patch('motor.motor_asyncio.AsyncIOMotorClient'):
             spec.loader.exec_module(self.api)
+        self.api.EMAIL_PROVIDER = 'smtp'
+        self.api.RESEND_API_KEY = ''
+        self.api.EMAIL_FROM = ''
+        self.real_user_lookup = self.api.get_user_by_email_or_username
         self.user = dict(_id='test-user', name='Test Engineer', email='test@example.com', password_hash='mock', role='reviewer')
         self.api.get_user_by_email_or_username = AsyncMock(side_effect=lambda _: self.user)
         self.api.verify_password = lambda *_: True
@@ -129,3 +134,40 @@ class AuthenticationRolesTest(unittest.IsolatedAsyncioTestCase):
             verified = await self.client.post('/auth/verify-mfa', json={'temp_token': login.json()['temp_token'], 'code': f' {code} '})
         self.assertEqual(verified.status_code, 200)
         self.assertEqual(verified.json()['role'], 'REVIEWER')
+
+    async def test_email_wait_is_bounded(self):
+        async def stalled(*args):
+            await asyncio.sleep(60)
+        with patch.object(self.api, 'run_in_threadpool', side_effect=stalled), patch.object(self.api, 'EMAIL_DELIVERY_DEADLINE_SECONDS', 0.01):
+            response = await asyncio.wait_for(self.client.post('/auth/login', json={'email': 'test@example.com', 'password': 'test'}), timeout=1)
+        self.assertEqual(response.status_code, 503)
+        self.assertIn('delivery timed out', response.json()['detail'])
+        self.api.create_access_token.assert_not_called()
+
+    async def test_database_wait_is_bounded(self):
+        async def stalled(*args):
+            await asyncio.sleep(60)
+        with patch.object(self.api, 'get_user_by_email_or_username', self.real_user_lookup), patch.object(self.api.users_collection, 'find_one', side_effect=stalled), patch.object(self.api, 'AUTH_DATABASE_DEADLINE_SECONDS', 0.01):
+            response = await asyncio.wait_for(self.client.post('/auth/login', json={'email': 'test@example.com', 'password': 'test'}), timeout=1)
+        self.assertEqual(response.status_code, 503)
+        self.assertIn('temporarily unavailable', response.json()['detail'])
+
+    async def test_resend_uses_https_without_smtp(self):
+        response = Mock(ok=True)
+        response.json.return_value = {'id': 'provider-message-id'}
+        with patch.multiple(self.api, EMAIL_PROVIDER='resend', RESEND_API_KEY='test-key', EMAIL_FROM='verified@example.com'), patch.object(self.api.requests, 'post', return_value=response) as post, patch.object(self.api.smtplib, 'SMTP') as smtp:
+            result = await self.client.post('/auth/login', json={'email': 'test@example.com', 'password': 'test'})
+        self.assertEqual(result.status_code, 200)
+        self.assertTrue(result.json()['mfa_required'])
+        smtp.assert_not_called()
+        self.assertEqual(post.call_args.args[0], 'https://api.resend.com/emails')
+        self.assertEqual(post.call_args.kwargs['json']['to'], ['test@example.com'])
+        self.assertEqual(post.call_args.kwargs['timeout'], (5, 10))
+
+    async def test_resend_failure_never_claims_delivery(self):
+        rejected = Mock(ok=False, status_code=403)
+        for failure in ['missing-key', 'provider-rejected', 'connection-timeout']:
+            with patch.multiple(self.api, EMAIL_PROVIDER='resend', RESEND_API_KEY='' if failure == 'missing-key' else 'test-key', EMAIL_FROM='verified@example.com'), patch.object(self.api.requests, 'post', return_value=rejected, side_effect=self.api.requests.Timeout() if failure == 'connection-timeout' else None):
+                response = await self.client.post('/auth/login', json={'email': 'test@example.com', 'password': 'test'})
+            self.assertEqual(response.status_code, 503)
+            self.assertNotIn('temp_token', response.json())

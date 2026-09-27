@@ -13,6 +13,9 @@ import secrets
 import logging
 import smtplib
 import ssl
+import asyncio
+import requests
+from pymongo.errors import PyMongoError
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from dotenv import load_dotenv
@@ -23,7 +26,7 @@ logger = logging.getLogger(__name__)
 # MongoDB Configuration
 MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
 DATABASE_NAME = os.getenv("DATABASE_NAME", "ginfina")
-client = AsyncIOMotorClient(MONGODB_URL)
+client = AsyncIOMotorClient(MONGODB_URL, serverSelectionTimeoutMS=5000, connectTimeoutMS=5000, socketTimeoutMS=5000)
 db = client[DATABASE_NAME]
 users_collection = db["users"]
 
@@ -34,8 +37,51 @@ SMTP_USERNAME = os.getenv("SMTP_USERNAME")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USERNAME or "noreply@gx1.com")
 SMTP_TIMEOUT_SECONDS = float(os.getenv("SMTP_TIMEOUT_SECONDS", "15"))
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
+EMAIL_PROVIDER = os.getenv("EMAIL_PROVIDER", "resend" if RESEND_API_KEY else "smtp").strip().lower()
+EMAIL_FROM = os.getenv("EMAIL_FROM", "").strip()
+EMAIL_DELIVERY_DEADLINE_SECONDS = 18
+AUTH_DATABASE_DEADLINE_SECONDS = 5
+
+
+def send_resend_email(to_email: str, subject: str, body: str):
+    """HTTPS transport for hosts where outbound SMTP is unavailable."""
+    if not RESEND_API_KEY or not EMAIL_FROM:
+        logger.error("auth.email.not_configured: Resend requires RESEND_API_KEY and EMAIL_FROM")
+        raise HTTPException(status_code=503, detail="Email delivery is not configured on the server. Contact your administrator.")
+    try:
+        response = requests.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+            json={"from": EMAIL_FROM, "to": [to_email], "subject": subject, "html": body},
+            timeout=(5, 10),
+        )
+        if not response.ok:
+            logger.error("auth.email.provider_rejected: provider=resend status=%s", response.status_code)
+            raise HTTPException(status_code=503, detail="The email provider rejected delivery. Contact your administrator to check the email configuration.")
+        if not response.json().get("id"):
+            raise ValueError("Missing provider message identifier")
+        logger.info("auth.email.accepted: provider=resend")
+        return True
+    except (requests.RequestException, ValueError) as exc:
+        logger.error("auth.email.failed: provider=resend category=%s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Unable to send the verification email. Please try again.") from exc
+
+
+async def run_email_delivery(function, *args):
+    # A socket timeout alone does not bound DNS lookup or multiple SMTP commands.
+    try:
+        return await asyncio.wait_for(run_in_threadpool(function, *args), timeout=EMAIL_DELIVERY_DEADLINE_SECONDS)
+    except asyncio.TimeoutError as exc:
+        logger.error("auth.email.delivery_timeout: provider=%s", EMAIL_PROVIDER)
+        raise HTTPException(status_code=503, detail="Email delivery timed out. Please try again or contact your administrator.") from exc
 
 def send_email(to_email: str, subject: str, body: str):
+    if EMAIL_PROVIDER == "resend":
+        return send_resend_email(to_email, subject, body)
+    if EMAIL_PROVIDER != "smtp":
+        logger.error("auth.email.not_configured: unsupported EMAIL_PROVIDER")
+        raise HTTPException(status_code=503, detail="Email delivery is not configured correctly. Contact your administrator.")
     if not SMTP_USERNAME or not SMTP_PASSWORD:
         logger.error("auth.email.not_configured: SMTP_USERNAME or SMTP_PASSWORD is missing")
         raise HTTPException(status_code=503, detail="Email delivery is not configured on the server. Contact your administrator.")
@@ -208,12 +254,16 @@ def verify_token(token: str) -> str:
 
 async def get_user_by_email_or_username(identifier: str):
     """Get user from MongoDB by email or username"""
-    user = await users_collection.find_one({
-        "$or": [
-            {"email": identifier},
-            {"name": identifier}
-        ]
-    })
+    try:
+        user = await asyncio.wait_for(users_collection.find_one({
+            "$or": [
+                {"email": identifier},
+                {"name": identifier}
+            ]
+        }), timeout=AUTH_DATABASE_DEADLINE_SECONDS)
+    except (asyncio.TimeoutError, PyMongoError) as exc:
+        logger.error("auth.database.unavailable: %s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Sign-in service is temporarily unavailable. Please try again.") from exc
     return user
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -273,7 +323,7 @@ async def login(user_data: UserLogin):
             detail="Incorrect email/username or password"
         )
     
-    return await run_in_threadpool(start_mfa_challenge, user)
+    return await run_email_delivery(start_mfa_challenge, user)
 
 @router.post("/verify-mfa", response_model=Token)
 async def verify_mfa(mfa_data: VerifyMfaRequest):
@@ -360,7 +410,7 @@ async def forgot_password(reset_data: ForgotPasswordRequest):
         </body>
     </html>
     """
-    await run_in_threadpool(send_email, user["email"], subject, body)
+    await run_email_delivery(send_email, user["email"], subject, body)
     
     return {
         "message": f"A password reset link has been successfully generated and sent to {reset_data.email}."
@@ -419,7 +469,7 @@ async def google_login(google_data: GoogleLoginRequest):
         await users_collection.insert_one(new_user)
         user = await get_user_by_email_or_username(email)
         
-    return await run_in_threadpool(start_mfa_challenge, user)
+    return await run_email_delivery(start_mfa_challenge, user)
 
 @router.get("/me", response_model=User)
 async def get_current_user_info(current_user: dict = Depends(get_current_user)):

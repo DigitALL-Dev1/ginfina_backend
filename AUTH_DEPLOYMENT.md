@@ -4,6 +4,24 @@ All account roles must complete email verification. `/api/auth/login` returns a 
 
 Configure these variables in the backend hosting service:
 
+## Railway Free / Trial / Hobby: use HTTPS email
+
+[Railway blocks SMTP on Free, Trial and Hobby plans](https://docs.railway.com/networking/outbound-networking). Changing SMTP ports will not enable email on those plans. The app now supports [Resend's HTTPS API](https://resend.com/docs/api-reference/emails/send-email).
+
+Set these **backend** Railway variables, then redeploy:
+
+```dotenv
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=<your Resend API key>
+EMAIL_FROM=GINFINA <login@your-verified-domain.example>
+```
+
+Replace the sender with an address on your verified Resend domain. Do not place the key in frontend variables or share it in chat. No SMTP credentials are needed for this provider. Check Resend delivery records and the recipient's spam folder if the provider accepted the message but it did not reach the inbox.
+
+## SMTP on a host that permits it
+
+Set `EMAIL_PROVIDER=smtp` and configure:
+
 | Variable | Purpose |
 | --- | --- |
 | `SMTP_HOST` | Mail provider's SMTP hostname |
@@ -19,6 +37,12 @@ Server environment variables take precedence over `.env` in authentication confi
 The frontend production build uses `https://ginfinabackend-production.up.railway.app/api`. If the frontend host defines `VITE_API_BASE_URL`, set it to that URL and rebuild; a host build variable overrides `.env.production`. Local development retains its local API setting.
 
 ## Diagnose failures
+
+Authentication database reads have a five-second deadline and email delivery has an eighteen-second deadline. The frontend stops waiting for authentication requests after thirty seconds, displays a persistent error, and allows another attempt. It never retries email automatically. A mail provider might still finish a timed-out delivery; a late code belongs to that earlier attempt, so use the code from your current successful sign-in request.
+
+- Login returns **503**, `auth.database.unavailable`: inspect MongoDB availability and backend database configuration.
+- Login returns **503**, `auth.email.delivery_timeout`: inspect host outbound networking and email provider settings; use HTTPS email where SMTP is blocked.
+- Login returns **503**, `auth.email.provider_rejected`: inspect the Resend API key, sender verification and provider delivery logs.
 
 - Login returns **503**, `auth.email.not_configured`: required SMTP credentials are missing.
 - Login returns **503**, `auth.email.failed: SMTPAuthenticationError`: check SMTP credentials and provider policy.
