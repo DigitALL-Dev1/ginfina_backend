@@ -18,9 +18,6 @@ class AuthenticationRolesTest(unittest.IsolatedAsyncioTestCase):
         # Import without opening a database connection or loading application secrets.
         with patch('dotenv.load_dotenv'), patch('motor.motor_asyncio.AsyncIOMotorClient'):
             spec.loader.exec_module(self.api)
-        self.api.EMAIL_PROVIDER = 'smtp'
-        self.api.RESEND_API_KEY = ''
-        self.api.EMAIL_FROM = ''
         self.real_user_lookup = self.api.get_user_by_email_or_username
         self.user = dict(_id='test-user', name='Test Engineer', email='test@example.com', password_hash='mock', role='reviewer')
         self.api.get_user_by_email_or_username = AsyncMock(side_effect=lambda _: self.user)
@@ -152,22 +149,18 @@ class AuthenticationRolesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 503)
         self.assertIn('temporarily unavailable', response.json()['detail'])
 
-    async def test_resend_uses_https_without_smtp(self):
-        response = Mock(ok=True)
-        response.json.return_value = {'id': 'provider-message-id'}
-        with patch.multiple(self.api, EMAIL_PROVIDER='resend', RESEND_API_KEY='test-key', EMAIL_FROM='verified@example.com'), patch.object(self.api.requests, 'post', return_value=response) as post, patch.object(self.api.smtplib, 'SMTP') as smtp:
-            result = await self.client.post('/auth/login', json={'email': 'test@example.com', 'password': 'test'})
-        self.assertEqual(result.status_code, 200)
-        self.assertTrue(result.json()['mfa_required'])
-        smtp.assert_not_called()
-        self.assertEqual(post.call_args.args[0], 'https://api.resend.com/emails')
-        self.assertEqual(post.call_args.kwargs['json']['to'], ['test@example.com'])
-        self.assertEqual(post.call_args.kwargs['timeout'], (5, 10))
-
-    async def test_resend_failure_never_claims_delivery(self):
-        rejected = Mock(ok=False, status_code=403)
-        for failure in ['missing-key', 'provider-rejected', 'connection-timeout']:
-            with patch.multiple(self.api, EMAIL_PROVIDER='resend', RESEND_API_KEY='' if failure == 'missing-key' else 'test-key', EMAIL_FROM='verified@example.com'), patch.object(self.api.requests, 'post', return_value=rejected, side_effect=self.api.requests.Timeout() if failure == 'connection-timeout' else None):
-                response = await self.client.post('/auth/login', json={'email': 'test@example.com', 'password': 'test'})
-            self.assertEqual(response.status_code, 503)
-            self.assertNotIn('temp_token', response.json())
+    async def test_login_sends_smtp_to_each_users_email(self):
+        for recipient in ['reviewer@example.com', 'approver@example.com']:
+            self.user['email'] = recipient
+            with patch.multiple(self.api, SMTP_USERNAME='sender@example.com', SMTP_PASSWORD='test-password', SMTP_FROM='sender@example.com', SMTP_PORT=587), patch.object(self.api.smtplib, 'SMTP') as smtp:
+                response = await self.client.post('/auth/login', json={'email': recipient, 'password': 'test'})
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()['mfa_required'])
+            server = smtp.return_value.__enter__.return_value
+            server.login.assert_called_once_with('sender@example.com', 'test-password')
+            server.send_message.assert_called_once()
+            message = server.send_message.call_args.args[0]
+            self.assertEqual(message['To'], recipient)
+            self.assertEqual(message['From'], 'sender@example.com')
+            self.assertRegex(message.get_payload()[0].get_payload(), r'<strong>\d{6}</strong>')
+        self.api.create_access_token.assert_not_called()

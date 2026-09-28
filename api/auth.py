@@ -14,7 +14,6 @@ import logging
 import smtplib
 import ssl
 import asyncio
-import requests
 from pymongo.errors import PyMongoError
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -37,35 +36,8 @@ SMTP_USERNAME = os.getenv("SMTP_USERNAME")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USERNAME or "noreply@gx1.com")
 SMTP_TIMEOUT_SECONDS = float(os.getenv("SMTP_TIMEOUT_SECONDS", "15"))
-RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
-EMAIL_PROVIDER = os.getenv("EMAIL_PROVIDER", "resend" if RESEND_API_KEY else "smtp").strip().lower()
-EMAIL_FROM = os.getenv("EMAIL_FROM", "").strip()
 EMAIL_DELIVERY_DEADLINE_SECONDS = 18
 AUTH_DATABASE_DEADLINE_SECONDS = 5
-
-
-def send_resend_email(to_email: str, subject: str, body: str):
-    """HTTPS transport for hosts where outbound SMTP is unavailable."""
-    if not RESEND_API_KEY or not EMAIL_FROM:
-        logger.error("auth.email.not_configured: Resend requires RESEND_API_KEY and EMAIL_FROM")
-        raise HTTPException(status_code=503, detail="Email delivery is not configured on the server. Contact your administrator.")
-    try:
-        response = requests.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
-            json={"from": EMAIL_FROM, "to": [to_email], "subject": subject, "html": body},
-            timeout=(5, 10),
-        )
-        if not response.ok:
-            logger.error("auth.email.provider_rejected: provider=resend status=%s", response.status_code)
-            raise HTTPException(status_code=503, detail="The email provider rejected delivery. Contact your administrator to check the email configuration.")
-        if not response.json().get("id"):
-            raise ValueError("Missing provider message identifier")
-        logger.info("auth.email.accepted: provider=resend")
-        return True
-    except (requests.RequestException, ValueError) as exc:
-        logger.error("auth.email.failed: provider=resend category=%s", type(exc).__name__)
-        raise HTTPException(status_code=503, detail="Unable to send the verification email. Please try again.") from exc
 
 
 async def run_email_delivery(function, *args):
@@ -73,15 +45,10 @@ async def run_email_delivery(function, *args):
     try:
         return await asyncio.wait_for(run_in_threadpool(function, *args), timeout=EMAIL_DELIVERY_DEADLINE_SECONDS)
     except asyncio.TimeoutError as exc:
-        logger.error("auth.email.delivery_timeout: provider=%s", EMAIL_PROVIDER)
+        logger.error("auth.email.delivery_timeout: provider=smtp")
         raise HTTPException(status_code=503, detail="Email delivery timed out. Please try again or contact your administrator.") from exc
 
 def send_email(to_email: str, subject: str, body: str):
-    if EMAIL_PROVIDER == "resend":
-        return send_resend_email(to_email, subject, body)
-    if EMAIL_PROVIDER != "smtp":
-        logger.error("auth.email.not_configured: unsupported EMAIL_PROVIDER")
-        raise HTTPException(status_code=503, detail="Email delivery is not configured correctly. Contact your administrator.")
     if not SMTP_USERNAME or not SMTP_PASSWORD:
         logger.error("auth.email.not_configured: SMTP_USERNAME or SMTP_PASSWORD is missing")
         raise HTTPException(status_code=503, detail="Email delivery is not configured on the server. Contact your administrator.")

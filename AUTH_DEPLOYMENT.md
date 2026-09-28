@@ -1,59 +1,55 @@
-# MFA on the deployed server
+﻿# SMTP MFA on your VPS
 
-All account roles must complete email verification. `/api/auth/login` returns a temporary session only after the mail provider accepts the email. `/api/auth/verify-mfa` returns the access token and role after verification.
+All account roles must complete email verification. `/api/auth/login` sends the code through SMTP to the signing-in user's stored email address. It returns a temporary session only after the SMTP server accepts the message. `/api/auth/verify-mfa` returns the access token and role after verification.
 
-Configure these variables in the backend hosting service:
+## Backend configuration
 
-## Railway Free / Trial / Hobby: use HTTPS email
-
-[Railway blocks SMTP on Free, Trial and Hobby plans](https://docs.railway.com/networking/outbound-networking). Changing SMTP ports will not enable email on those plans. The app now supports [Resend's HTTPS API](https://resend.com/docs/api-reference/emails/send-email).
-
-Set these **backend** Railway variables, then redeploy:
+Configure the following in the VPS backend environment or its private `.env` file:
 
 ```dotenv
-EMAIL_PROVIDER=resend
-RESEND_API_KEY=<your Resend API key>
-EMAIL_FROM=GINFINA <login@your-verified-domain.example>
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=your-sending-account@gmail.com
+SMTP_PASSWORD=your-smtp-app-password
+SMTP_FROM=your-sending-account@gmail.com
+SMTP_TIMEOUT_SECONDS=15
+FRONTEND_URL=https://your-frontend-domain.example
+SECRET_KEY=replace-with-a-strong-stable-signing-secret
 ```
 
-Replace the sender with an address on your verified Resend domain. Do not place the key in frontend variables or share it in chat. No SMTP credentials are needed for this provider. Check Resend delivery records and the recipient's spam folder if the provider accepted the message but it did not reach the inbox.
+Replace all example values with your actual settings. For another email provider, use its SMTP hostname, credentials and authorized sender address. The implementation uses STARTTLS on port `587` and implicit TLS on port `465`. The VPS must permit outbound connections to the configured SMTP host and port. The sender is configured by `SMTP_FROM`; recipients come from user records, not from a fixed test recipient.
 
-## SMTP on a host that permits it
+SMTP is the only email transport; no provider-selection variable or email API key is required. Authentication reads server environment variables before local `.env` values. Keep the existing MongoDB configuration and restart the backend after changes. Keep `.env` out of Git.
 
-Set `EMAIL_PROVIDER=smtp` and configure:
+Set `FRONTEND_URL` to the deployed frontend origin so password reset links point to the right website. Keep the same `SECRET_KEY` across backend instances. Changing it invalidates existing sessions, including pending MFA attempts. Codes expire after five minutes.
 
-| Variable | Purpose |
-| --- | --- |
-| `SMTP_HOST` | Mail provider's SMTP hostname |
-| `SMTP_PORT` | `587` for STARTTLS, or `465` for implicit TLS |
-| `SMTP_USERNAME` | SMTP login |
-| `SMTP_PASSWORD` | SMTP password or provider app password |
-| `SMTP_FROM` | Sender address authorized by the provider |
-| `SMTP_TIMEOUT_SECONDS` | Socket timeout; defaults to `15` |
-| `SECRET_KEY` | A strong, stable signing secret shared by all backend instances |
+## Frontend configuration
 
-Server environment variables take precedence over `.env` in authentication configuration. Redeploy after code or configuration changes. Request a fresh code if the signing secret changes; codes expire after five minutes. Provider acceptance does not guarantee inbox delivery, so also check spam and provider delivery records.
+Before building the frontend for the VPS, set:
 
-The frontend production build uses `https://ginfinabackend-production.up.railway.app/api`. If the frontend host defines `VITE_API_BASE_URL`, set it to that URL and rebuild; a host build variable overrides `.env.production`. Local development retains its local API setting.
+```dotenv
+VITE_API_BASE_URL=https://your-backend-domain.example/api
+VITE_DEMO_MODE=false
+```
+
+Use the actual public backend address. The repository's production frontend configuration currently points to the previous Railway backend; override it with your VPS address and rebuild before deployment. Never place SMTP credentials in frontend variables. Local development can continue using `http://127.0.0.1:8001/api`.
 
 ## Diagnose failures
 
-Authentication database reads have a five-second deadline and email delivery has an eighteen-second deadline. The frontend stops waiting for authentication requests after thirty seconds, displays a persistent error, and allows another attempt. It never retries email automatically. A mail provider might still finish a timed-out delivery; a late code belongs to that earlier attempt, so use the code from your current successful sign-in request.
+Authentication database reads have a five-second deadline and email delivery has an eighteen-second deadline. The frontend stops waiting for authentication requests after thirty seconds, displays a persistent error, and allows another attempt. It never retries email automatically. A mail server might still finish a timed-out delivery; use the code from your current successful sign-in request.
 
-- Login returns **503**, `auth.database.unavailable`: inspect MongoDB availability and backend database configuration.
-- Login returns **503**, `auth.email.delivery_timeout`: inspect host outbound networking and email provider settings; use HTTPS email where SMTP is blocked.
-- Login returns **503**, `auth.email.provider_rejected`: inspect the Resend API key, sender verification and provider delivery logs.
+- **503**, `auth.database.unavailable`: check MongoDB availability and backend database configuration.
+- **503**, `auth.email.delivery_timeout`: check VPS outbound connectivity and SMTP settings.
+- **503**, `auth.email.not_configured`: SMTP credentials are missing.
+- **503**, `auth.email.failed: SMTPAuthenticationError`: check credentials and your mail provider's authentication requirements.
+- **503**, `auth.email.failed: TimeoutError` or another connection error: check hostname, port, firewall and hosting-provider SMTP restrictions.
+- **401**, `auth.mfa.expired`: sign in again and use the new code.
+- **401**, `auth.mfa.invalid_session`: check that requests use the same deployment and all instances use the same signing secret.
+- **400**, `auth.mfa.incorrect_code`: use the code from the email for the current sign-in attempt.
 
-- Login returns **503**, `auth.email.not_configured`: required SMTP credentials are missing.
-- Login returns **503**, `auth.email.failed: SMTPAuthenticationError`: check SMTP credentials and provider policy.
-- Login returns **503**, `auth.email.failed: TimeoutError` or another connection error: check outbound SMTP connectivity, hostname and port on the backend host.
-- Verification returns **401**, `auth.mfa.expired`: sign in again and use the new code.
-- Verification returns **401**, `auth.mfa.invalid_session`: check that both requests use the same deployment and that all instances use the same `SECRET_KEY`.
-- Verification returns **400**, `auth.mfa.incorrect_code`: use the code from the email for the current sign-in attempt.
+SMTP acceptance does not guarantee inbox delivery. Check the recipient address, spam folder and mail-provider delivery records. Logs exclude verification codes, tokens, email bodies and passwords.
 
-Email failure logs include the error category and host/port, never verification codes, tokens, email bodies or passwords. Do not share those secrets when reporting an issue.
-
-Run isolated checks (no live database or email traffic):
+Run isolated checks from the backend directory (no live database or email traffic):
 
 ```powershell
 python -B -m unittest discover -s tests -p test_auth_roles.py -v
