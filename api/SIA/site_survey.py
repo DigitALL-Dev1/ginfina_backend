@@ -1,5 +1,6 @@
+from .scope import SIAScope, apply_scope
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import Field
 from typing import Optional, List
 from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -81,7 +82,7 @@ def not_found(entity: str, id: str):
 # SIA_SITE
 # ════════════════════════════════════════════════════════════
 
-class SitCreate(BaseModel):
+class SitCreate(SIAScope):
     sia_case_id:   str = Field(..., description="FK → sia_case._id (NOT NULL)")
     site_code:     str = Field(..., max_length=50)
     site_name:     Optional[str] = Field(None, max_length=255)
@@ -93,7 +94,7 @@ class SitCreate(BaseModel):
     longitude:     Optional[float] = None
     status:        Optional[str] = Field(None, max_length=50)
 
-class SiteResponse(BaseModel):
+class SiteResponse(SIAScope):
     id: str
     sia_case_id:   str
     site_code:     str
@@ -109,6 +110,7 @@ class SiteResponse(BaseModel):
 
 def _site(doc) -> dict:
     return {
+        "site_id": doc.get("site_id"),
         "id": str(doc["_id"]), "sia_case_id": doc["sia_case_id"],
         "site_code": doc["site_code"], "site_name": doc.get("site_name"),
         "site_type": doc.get("site_type"), "address": doc.get("address"),
@@ -120,6 +122,7 @@ def _site(doc) -> dict:
 @router.post("/sia/sites", response_model=SiteResponse, status_code=201, tags=["SIA - Sites & Survey"])
 async def create_site(data: SitCreate):
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_site")
     await site_col.insert_one(doc)
     return _site(doc)
 
@@ -139,7 +142,7 @@ async def get_sites_by_case(case_id: str):
 # SIA_BUILDING
 # ════════════════════════════════════════════════════════════
 
-class BuildingCreate(BaseModel):
+class BuildingCreate(SIAScope):
     site_id:        str = Field(..., description="FK → sia_site._id (NOT NULL)")
     building_code:  Optional[str] = Field(None, max_length=50)
     building_name:  Optional[str] = Field(None, max_length=150)
@@ -147,7 +150,7 @@ class BuildingCreate(BaseModel):
     floor_count:    Optional[int] = None
     description:    Optional[str] = None
 
-class BuildingResponse(BaseModel):
+class BuildingResponse(SIAScope):
     id: str
     site_id:       str
     building_code: Optional[str]
@@ -159,6 +162,7 @@ class BuildingResponse(BaseModel):
 
 def _building(doc) -> dict:
     return {
+        "sia_case_id": doc.get("sia_case_id"),
         "id": str(doc["_id"]), "site_id": doc["site_id"],
         "building_code": doc.get("building_code"), "building_name": doc.get("building_name"),
         "building_type": doc.get("building_type"), "floor_count": doc.get("floor_count"),
@@ -170,6 +174,7 @@ async def create_building(data: BuildingCreate):
     if not await site_col.find_one({"_id": data.site_id}):
         not_found("Site", data.site_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_building")
     await building_col.insert_one(doc)
     return _building(doc)
 
@@ -189,7 +194,7 @@ async def get_buildings_by_site(site_id: str):
 # SIA_ROOM_AREA
 # ════════════════════════════════════════════════════════════
 
-class RoomAreaCreate(BaseModel):
+class RoomAreaCreate(SIAScope):
     building_id: Optional[str] = Field(None, description="FK → sia_building._id")
     site_id:     str = Field(..., description="FK → sia_site._id (NOT NULL)")
     area_code:   Optional[str] = Field(None, max_length=50)
@@ -198,7 +203,7 @@ class RoomAreaCreate(BaseModel):
     floor_level: Optional[str] = Field(None, max_length=50)
     description: Optional[str] = None
 
-class RoomAreaResponse(BaseModel):
+class RoomAreaResponse(SIAScope):
     id: str
     building_id: Optional[str]
     site_id:     str
@@ -211,6 +216,7 @@ class RoomAreaResponse(BaseModel):
 
 def _room_area(doc) -> dict:
     return {
+        "sia_case_id": doc.get("sia_case_id"),
         "id": str(doc["_id"]), "building_id": doc.get("building_id"), "site_id": doc["site_id"],
         "area_code": doc.get("area_code"), "area_name": doc.get("area_name"),
         "area_type": doc.get("area_type"), "floor_level": doc.get("floor_level"),
@@ -222,6 +228,7 @@ async def create_room_area(data: RoomAreaCreate):
     if not await site_col.find_one({"_id": data.site_id}):
         not_found("Site", data.site_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_room_area")
     await room_area_col.insert_one(doc)
     return _room_area(doc)
 
@@ -241,7 +248,7 @@ async def get_room_areas_by_building(building_id: str):
 # SIA_POI
 # ════════════════════════════════════════════════════════════
 
-class POICreate(BaseModel):
+class POICreate(SIAScope):
     site_id:     str = Field(..., description="FK → sia_site._id (NOT NULL)")
     room_area_id: Optional[str] = Field(None, description="FK → sia_room_area._id")
     poi_code:    Optional[str] = Field(None, max_length=50)
@@ -252,7 +259,7 @@ class POICreate(BaseModel):
     longitude:   Optional[float] = None
     description: Optional[str] = None
 
-class POIResponse(BaseModel):
+class POIResponse(SIAScope):
     id: str
     site_id:      str
     room_area_id: Optional[str]
@@ -267,6 +274,7 @@ class POIResponse(BaseModel):
 
 def _poi(doc) -> dict:
     return {
+        "sia_case_id": doc.get("sia_case_id"),
         "id": str(doc["_id"]), "site_id": doc["site_id"], "room_area_id": doc.get("room_area_id"),
         "poi_code": doc.get("poi_code"), "poi_name": doc.get("poi_name"),
         "poi_type": doc.get("poi_type"), "category": doc.get("category"),
@@ -279,6 +287,7 @@ async def create_poi(data: POICreate):
     if not await site_col.find_one({"_id": data.site_id}):
         not_found("Site", data.site_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_poi")
     await poi_col.insert_one(doc)
     return _poi(doc)
 
@@ -298,7 +307,7 @@ async def get_pois_by_site(site_id: str):
 # SIA_SURVEY_VISIT
 # ════════════════════════════════════════════════════════════
 
-class SurveyVisitCreate(BaseModel):
+class SurveyVisitCreate(SIAScope):
     site_id:            str = Field(..., description="FK → sia_site._id (NOT NULL)")
     visit_code:         Optional[str] = Field(None, max_length=50)
     visit_type:         Optional[str] = Field(None, max_length=100)
@@ -310,7 +319,7 @@ class SurveyVisitCreate(BaseModel):
     actual_end:         Optional[str] = Field(None, description="Datetime string")
     status:             Optional[str] = Field(None, max_length=50)
 
-class SurveyVisitResponse(BaseModel):
+class SurveyVisitResponse(SIAScope):
     id: str
     site_id:            str
     visit_code:         Optional[str]
@@ -326,6 +335,7 @@ class SurveyVisitResponse(BaseModel):
 
 def _visit(doc) -> dict:
     return {
+        "sia_case_id": doc.get("sia_case_id"),
         "id": str(doc["_id"]), "site_id": doc["site_id"],
         "visit_code": doc.get("visit_code"), "visit_type": doc.get("visit_type"),
         "purpose": doc.get("purpose"), "planned_date": doc.get("planned_date"),
@@ -339,6 +349,7 @@ async def create_survey_visit(data: SurveyVisitCreate):
     if not await site_col.find_one({"_id": data.site_id}):
         not_found("Site", data.site_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_survey_visit")
     await survey_visit_col.insert_one(doc)
     return _visit(doc)
 
@@ -358,13 +369,13 @@ async def get_visits_by_site(site_id: str):
 # SIA_SURVEY_TEAM
 # ════════════════════════════════════════════════════════════
 
-class SurveyTeamCreate(BaseModel):
+class SurveyTeamCreate(SIAScope):
     survey_visit_id: str = Field(..., description="FK → sia_survey_visit._id (NOT NULL)")
     user_id:         Optional[str] = Field(None, description="FK → users._id")
     team_role:       Optional[str] = Field(None, max_length=100)
     is_lead:         Optional[bool] = False
 
-class SurveyTeamResponse(BaseModel):
+class SurveyTeamResponse(SIAScope):
     id: str
     survey_visit_id: str
     user_id:         str
@@ -374,6 +385,7 @@ class SurveyTeamResponse(BaseModel):
 
 def _team(doc) -> dict:
     return {
+        "sia_case_id": doc.get("sia_case_id"), "site_id": doc.get("site_id"),
         "id": str(doc["_id"]), "survey_visit_id": doc["survey_visit_id"],
         "user_id": doc["user_id"], "team_role": doc.get("team_role"),
         "is_lead": doc.get("is_lead", False), "created_at": doc["created_at"],
@@ -384,6 +396,7 @@ async def create_survey_team_member(data: SurveyTeamCreate):
     if not await survey_visit_col.find_one({"_id": data.survey_visit_id}):
         not_found("Survey Visit", data.survey_visit_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_survey_team")
     await survey_team_col.insert_one(doc)
     return _team(doc)
 
@@ -397,7 +410,7 @@ async def get_team_by_visit(visit_id: str):
 # SIA_SITE_ACCESS
 # ════════════════════════════════════════════════════════════
 
-class SiteAccessCreate(BaseModel):
+class SiteAccessCreate(SIAScope):
     site_id:              str = Field(..., description="FK → sia_site._id (NOT NULL)")
     access_type:          Optional[str] = Field(None, max_length=100)
     road_condition:       Optional[str] = Field(None, max_length=100)
@@ -407,7 +420,7 @@ class SiteAccessCreate(BaseModel):
     access_restriction:   Optional[str] = None
     logistics_notes:      Optional[str] = None
 
-class SiteAccessResponse(BaseModel):
+class SiteAccessResponse(SIAScope):
     id: str
     site_id:            str
     access_type:        Optional[str]
@@ -421,6 +434,7 @@ class SiteAccessResponse(BaseModel):
 
 def _access(doc) -> dict:
     return {
+        "sia_case_id": doc.get("sia_case_id"),
         "id": str(doc["_id"]), "site_id": doc["site_id"],
         "access_type": doc.get("access_type"), "road_condition": doc.get("road_condition"),
         "transport_method": doc.get("transport_method"), "entry_permission": doc.get("entry_permission"),
@@ -433,6 +447,7 @@ async def create_site_access(data: SiteAccessCreate):
     if not await site_col.find_one({"_id": data.site_id}):
         not_found("Site", data.site_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_site_access")
     await site_access_col.insert_one(doc)
     return _access(doc)
 
@@ -446,7 +461,7 @@ async def get_site_access(site_id: str):
 # SIA_SITE_SAFETY
 # ════════════════════════════════════════════════════════════
 
-class SiteSafetyCreate(BaseModel):
+class SiteSafetyCreate(SIAScope):
     site_id:           str = Field(..., description="FK → sia_site._id (NOT NULL)")
     hazard_type:       Optional[str] = Field(None, max_length=100)
     risk_level:        Optional[str] = Field(None, max_length=50)
@@ -456,7 +471,7 @@ class SiteSafetyCreate(BaseModel):
     emergency_contact: Optional[str] = Field(None, max_length=150)
     control_action:    Optional[str] = None
 
-class SiteSafetyResponse(BaseModel):
+class SiteSafetyResponse(SIAScope):
     id: str
     site_id:           str
     hazard_type:       Optional[str]
@@ -470,6 +485,7 @@ class SiteSafetyResponse(BaseModel):
 
 def _safety(doc) -> dict:
     return {
+        "sia_case_id": doc.get("sia_case_id"),
         "id": str(doc["_id"]), "site_id": doc["site_id"],
         "hazard_type": doc.get("hazard_type"), "risk_level": doc.get("risk_level"),
         "description": doc.get("description"), "ppe_required": doc.get("ppe_required"),
@@ -483,6 +499,7 @@ async def create_site_safety(data: SiteSafetyCreate):
     if not await site_col.find_one({"_id": data.site_id}):
         not_found("Site", data.site_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_site_safety")
     await site_safety_col.insert_one(doc)
     return _safety(doc)
 
@@ -496,7 +513,7 @@ async def get_site_safety(site_id: str):
 # SIA_SURVEY_REQUIREMENT
 # ════════════════════════════════════════════════════════════
 
-class SurveyRequirementCreate(BaseModel):
+class SurveyRequirementCreate(SIAScope):
     survey_visit_id:    str = Field(..., description="FK → sia_survey_visit._id (NOT NULL)")
     assessment_pack_id: Optional[str] = Field(None, description="FK → sia_assessment_pack._id")
     requirement_name:   Optional[str] = Field(None, max_length=255)
@@ -505,7 +522,7 @@ class SurveyRequirementCreate(BaseModel):
     status:             Optional[str] = Field(None, max_length=50)
     notes:              Optional[str] = None
 
-class SurveyRequirementResponse(BaseModel):
+class SurveyRequirementResponse(SIAScope):
     id: str
     survey_visit_id:    str
     assessment_pack_id: Optional[str]
@@ -518,6 +535,7 @@ class SurveyRequirementResponse(BaseModel):
 
 def _req(doc) -> dict:
     return {
+        "sia_case_id": doc.get("sia_case_id"), "site_id": doc.get("site_id"),
         "id": str(doc["_id"]), "survey_visit_id": doc["survey_visit_id"],
         "assessment_pack_id": doc.get("assessment_pack_id"),
         "requirement_name": doc.get("requirement_name"), "requirement_type": doc.get("requirement_type"),
@@ -530,6 +548,7 @@ async def create_survey_requirement(data: SurveyRequirementCreate):
     if not await survey_visit_col.find_one({"_id": data.survey_visit_id}):
         not_found("Survey Visit", data.survey_visit_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_survey_requirement")
     await survey_req_col.insert_one(doc)
     return _req(doc)
 
@@ -543,7 +562,7 @@ async def get_requirements_by_visit(visit_id: str):
 # SIA_SURVEY_INSTRUMENT
 # ════════════════════════════════════════════════════════════
 
-class SurveyInstrumentCreate(BaseModel):
+class SurveyInstrumentCreate(SIAScope):
     survey_visit_id:    str = Field(..., description="FK → sia_survey_visit._id (NOT NULL)")
     instrument_name:    Optional[str] = Field(None, max_length=150)
     instrument_type:    Optional[str] = Field(None, max_length=100)
@@ -551,7 +570,7 @@ class SurveyInstrumentCreate(BaseModel):
     calibration_status: Optional[str] = Field(None, max_length=50)
     required:           Optional[bool] = False
 
-class SurveyInstrumentResponse(BaseModel):
+class SurveyInstrumentResponse(SIAScope):
     id: str
     survey_visit_id:    str
     instrument_name:    Optional[str]
@@ -563,6 +582,7 @@ class SurveyInstrumentResponse(BaseModel):
 
 def _instrument(doc) -> dict:
     return {
+        "sia_case_id": doc.get("sia_case_id"), "site_id": doc.get("site_id"),
         "id": str(doc["_id"]), "survey_visit_id": doc["survey_visit_id"],
         "instrument_name": doc.get("instrument_name"), "instrument_type": doc.get("instrument_type"),
         "serial_number": doc.get("serial_number"), "calibration_status": doc.get("calibration_status"),
@@ -574,6 +594,7 @@ async def create_survey_instrument(data: SurveyInstrumentCreate):
     if not await survey_visit_col.find_one({"_id": data.survey_visit_id}):
         not_found("Survey Visit", data.survey_visit_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_survey_instrument")
     await survey_inst_col.insert_one(doc)
     return _instrument(doc)
 

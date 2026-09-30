@@ -1,5 +1,6 @@
+from .scope import SIAScope, apply_scope
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import Field
 from typing import Optional, List
 from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -109,7 +110,7 @@ async def require(col, eid: str, name: str):
 # SIA_EVIDENCE
 # ════════════════════════════════════════════════════════════
 
-class EvidenceCreate(BaseModel):
+class EvidenceCreate(SIAScope):
     sia_case_id:              str = Field(..., description="FK → sia_case._id (NOT NULL)")
     site_id:                  Optional[str] = None
     poi_id:                   Optional[str] = None
@@ -133,6 +134,7 @@ class EvidenceResponse(EvidenceCreate):
              status_code=201, tags=["SIA - Evidence, AI & Readiness"])
 async def create_evidence(data: EvidenceCreate):
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_evidence")
     await evidence_col.insert_one(doc)
     return ser(doc)
 
@@ -154,7 +156,7 @@ async def get_evidence_by_case(case_id: str):
 # SIA_EVIDENCE_VERIFICATION
 # ════════════════════════════════════════════════════════════
 
-class EvidenceVerificationCreate(BaseModel):
+class EvidenceVerificationCreate(SIAScope):
     evidence_id:          str = Field(..., description="FK → sia_evidence._id (NOT NULL)")
     verified_by:          Optional[str] = Field(None, description="FK → users._id")
     verification_status:  Optional[str] = Field(None, max_length=50)
@@ -170,6 +172,7 @@ class EvidenceVerificationResponse(EvidenceVerificationCreate):
 async def create_evidence_verification(data: EvidenceVerificationCreate):
     await require(evidence_col, data.evidence_id, "Evidence")
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_evidence_verification")
     await evidence_verif_col.insert_one(doc)
     return ser(doc)
 
@@ -185,7 +188,7 @@ async def get_evidence_verifications(evidence_id: str):
 # SIA_SOURCE_FACT
 # ════════════════════════════════════════════════════════════
 
-class SourceFactCreate(BaseModel):
+class SourceFactCreate(SIAScope):
     sia_case_id:        str = Field(..., description="FK → sia_case._id (NOT NULL)")
     site_id:            Optional[str] = None
     evidence_id:        Optional[str] = None
@@ -204,6 +207,7 @@ class SourceFactResponse(SourceFactCreate):
              status_code=201, tags=["SIA - Evidence, AI & Readiness"])
 async def create_source_fact(data: SourceFactCreate):
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_source_fact")
     await source_fact_col.insert_one(doc)
     return ser(doc)
 
@@ -218,7 +222,7 @@ async def get_source_facts_by_case(case_id: str):
 # SIA_AI_OBSERVATION
 # ════════════════════════════════════════════════════════════
 
-class AIObservationCreate(BaseModel):
+class AIObservationCreate(SIAScope):
     sia_case_id:        str = Field(..., description="FK → sia_case._id (NOT NULL)")
     site_id:            Optional[str] = None
     observation_code:   str = Field(..., max_length=50)
@@ -238,6 +242,7 @@ class AIObservationResponse(AIObservationCreate):
              status_code=201, tags=["SIA - Evidence, AI & Readiness"])
 async def create_ai_observation(data: AIObservationCreate):
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_ai_observation")
     await ai_obs_col.insert_one(doc)
     return ser(doc)
 
@@ -254,7 +259,7 @@ async def get_ai_observations_by_case(case_id: str):
 
 DISPOSITIONS = ["ACCEPTED", "REJECTED", "MODIFIED", "ESCALATED"]
 
-class AIDispositionCreate(BaseModel):
+class AIDispositionCreate(SIAScope):
     ai_observation_id:  str = Field(..., description="FK → sia_ai_observation._id (NOT NULL)")
     reviewer_user_id:   Optional[str] = Field(None, description="FK → users._id")
     disposition:        Optional[str] = Field(None, max_length=50,
@@ -272,6 +277,7 @@ class AIDispositionResponse(AIDispositionCreate):
 async def create_ai_disposition(data: AIDispositionCreate):
     await require(ai_obs_col, data.ai_observation_id, "AI Observation")
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_ai_disposition")
     await ai_disp_col.insert_one(doc)
     return ser(doc)
 
@@ -287,7 +293,7 @@ async def get_ai_dispositions(obs_id: str):
 # SIA_CONFLICT
 # ════════════════════════════════════════════════════════════
 
-class ConflictCreate(BaseModel):
+class ConflictCreate(SIAScope):
     sia_case_id:    str = Field(..., description="FK → sia_case._id (NOT NULL)")
     site_id:        Optional[str] = None
     conflict_code:  Optional[str] = Field(None, max_length=50)
@@ -309,6 +315,7 @@ class ConflictResponse(ConflictCreate):
              status_code=201, tags=["SIA - Evidence, AI & Readiness"])
 async def create_conflict(data: ConflictCreate):
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_conflict")
     await conflict_col.insert_one(doc)
     return ser(doc)
 
@@ -323,7 +330,7 @@ async def get_conflicts_by_case(case_id: str):
 # SIA_CONFLICT_RESOLUTION
 # ════════════════════════════════════════════════════════════
 
-class ConflictResolutionCreate(BaseModel):
+class ConflictResolutionCreate(SIAScope):
     conflict_id:        str = Field(..., description="FK → sia_conflict._id (NOT NULL)")
     resolved_by:        Optional[str] = Field(None, description="FK → users._id")
     accepted_value:     Optional[str] = None
@@ -340,6 +347,7 @@ class ConflictResolutionResponse(ConflictResolutionCreate):
 async def create_conflict_resolution(data: ConflictResolutionCreate):
     await require(conflict_col, data.conflict_id, "Conflict")
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_conflict_resolution")
     await conflict_res_col.insert_one(doc)
     return ser(doc)
 
@@ -355,7 +363,7 @@ async def get_conflict_resolutions(conflict_id: str):
 # SIA_DATA_GAP
 # ════════════════════════════════════════════════════════════
 
-class DataGapCreate(BaseModel):
+class DataGapCreate(SIAScope):
     sia_case_id:     str = Field(..., description="FK → sia_case._id (NOT NULL)")
     site_id:         Optional[str] = None
     gap_code:        Optional[str] = Field(None, max_length=50)
@@ -375,6 +383,7 @@ class DataGapResponse(DataGapCreate):
              status_code=201, tags=["SIA - Evidence, AI & Readiness"])
 async def create_data_gap(data: DataGapCreate):
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_data_gap")
     await data_gap_col.insert_one(doc)
     return ser(doc)
 
@@ -396,7 +405,7 @@ async def get_data_gaps_by_case(case_id: str):
 # SIA_RFI_ACTION
 # ════════════════════════════════════════════════════════════
 
-class RFIActionCreate(BaseModel):
+class RFIActionCreate(SIAScope):
     sia_case_id:  str = Field(..., description="FK → sia_case._id (NOT NULL)")
     data_gap_id:  Optional[str] = None
     action_code:  Optional[str] = Field(None, max_length=50)
@@ -417,6 +426,7 @@ class RFIActionResponse(RFIActionCreate):
              status_code=201, tags=["SIA - Evidence, AI & Readiness"])
 async def create_rfi_action(data: RFIActionCreate):
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_rfi_action")
     await rfi_action_col.insert_one(doc)
     return ser(doc)
 
@@ -437,7 +447,7 @@ async def get_rfi_actions_by_gap(gap_id: str):
 # SIA_CONSTRAINT_ASSUMPTION
 # ════════════════════════════════════════════════════════════
 
-class ConstraintAssumptionCreate(BaseModel):
+class ConstraintAssumptionCreate(SIAScope):
     sia_case_id:        str = Field(..., description="FK → sia_case._id (NOT NULL)")
     site_id:            Optional[str] = None
     record_type:        Optional[str] = Field(None, max_length=50,
@@ -457,6 +467,7 @@ class ConstraintAssumptionResponse(ConstraintAssumptionCreate):
              status_code=201, tags=["SIA - Evidence, AI & Readiness"])
 async def create_constraint_assumption(data: ConstraintAssumptionCreate):
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_constraint_assumption")
     await constraint_col.insert_one(doc)
     return ser(doc)
 
@@ -474,7 +485,7 @@ async def get_constraints_assumptions_by_case(case_id: str):
 
 READINESS_STATUSES = ["NOT_ASSESSED", "READY", "CONDITIONAL", "BLOCKED", "NOT_APPLICABLE"]
 
-class DisciplineReadinessCreate(BaseModel):
+class DisciplineReadinessCreate(SIAScope):
     sia_case_id:      str = Field(..., description="FK → sia_case._id (NOT NULL)")
     site_id:          str = Field(..., description="FK → sia_site._id (NOT NULL)")
     discipline:       str = Field(..., max_length=100)
@@ -492,6 +503,7 @@ class DisciplineReadinessResponse(DisciplineReadinessCreate):
              status_code=201, tags=["SIA - Evidence, AI & Readiness"])
 async def create_discipline_readiness(data: DisciplineReadinessCreate):
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_discipline_readiness")
     await disc_ready_col.insert_one(doc)
     return ser(doc)
 
@@ -515,7 +527,7 @@ async def get_discipline_readiness_by_case(case_id: str):
 # SIA_READINESS_CONDITION
 # ════════════════════════════════════════════════════════════
 
-class ReadinessConditionCreate(BaseModel):
+class ReadinessConditionCreate(SIAScope):
     discipline_readiness_id: str = Field(..., description="FK → sia_discipline_readiness._id (NOT NULL)")
     condition_description:   Optional[str] = None
     required_action:         Optional[str] = None
@@ -532,6 +544,7 @@ class ReadinessConditionResponse(ReadinessConditionCreate):
 async def create_readiness_condition(data: ReadinessConditionCreate):
     await require(disc_ready_col, data.discipline_readiness_id, "Discipline Readiness")
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_readiness_condition")
     await ready_cond_col.insert_one(doc)
     return ser(doc)
 
@@ -547,7 +560,7 @@ async def get_readiness_conditions(readiness_id: str):
 # SIA_READINESS_BLOCKER
 # ════════════════════════════════════════════════════════════
 
-class ReadinessBlockerCreate(BaseModel):
+class ReadinessBlockerCreate(SIAScope):
     discipline_readiness_id: str = Field(..., description="FK → sia_discipline_readiness._id (NOT NULL)")
     data_gap_id:             Optional[str] = Field(None, description="FK → sia_data_gap._id")
     blocker_type:            Optional[str] = Field(None, max_length=100)
@@ -565,6 +578,7 @@ class ReadinessBlockerResponse(ReadinessBlockerCreate):
 async def create_readiness_blocker(data: ReadinessBlockerCreate):
     await require(disc_ready_col, data.discipline_readiness_id, "Discipline Readiness")
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_readiness_blocker")
     await ready_blocker_col.insert_one(doc)
     return ser(doc)
 
@@ -580,7 +594,7 @@ async def get_readiness_blockers(readiness_id: str):
 # SIA_READINESS_REVIEW
 # ════════════════════════════════════════════════════════════
 
-class ReadinessReviewCreate(BaseModel):
+class ReadinessReviewCreate(SIAScope):
     discipline_readiness_id: str = Field(..., description="FK → sia_discipline_readiness._id (NOT NULL)")
     reviewer_user_id:        Optional[str] = Field(None, description="FK → users._id")
     review_decision:         Optional[str] = Field(None, max_length=50)
@@ -596,6 +610,7 @@ class ReadinessReviewResponse(ReadinessReviewCreate):
 async def create_readiness_review(data: ReadinessReviewCreate):
     await require(disc_ready_col, data.discipline_readiness_id, "Discipline Readiness")
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_readiness_review")
     await ready_review_col.insert_one(doc)
     return ser(doc)
 

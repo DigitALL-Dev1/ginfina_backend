@@ -1,5 +1,6 @@
+from .scope import SIAScope, apply_scope
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import Field
 from typing import Optional, List
 from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -111,7 +112,7 @@ async def req(col, eid, name):
 # SIA_MOBILE_DEVICE
 # ════════════════════════════════════════════════════════════
 
-class MobileDeviceCreate(BaseModel):
+class MobileDeviceCreate(SIAScope):
     user_id:       Optional[str] = Field(None, description="FK → users._id")
     device_uuid:   str = Field(..., max_length=150)
     device_name:   Optional[str] = Field(None, max_length=150)
@@ -128,6 +129,7 @@ class MobileDeviceResponse(MobileDeviceCreate):
 @router.post("/sia/mobile-devices", response_model=MobileDeviceResponse, status_code=201, tags=["SIA - Android Field Ops"])
 async def create_mobile_device(data: MobileDeviceCreate):
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_mobile_device")
     await device_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/mobile-devices/{device_id}", response_model=MobileDeviceResponse, tags=["SIA - Android Field Ops"])
@@ -144,7 +146,7 @@ async def list_mobile_devices():
 # SIA_FIELD_CASE_DOWNLOAD
 # ════════════════════════════════════════════════════════════
 
-class FieldCaseDownloadCreate(BaseModel):
+class FieldCaseDownloadCreate(SIAScope):
     sia_case_id:     str = Field(...)
     site_id:         str = Field(...)
     survey_visit_id: Optional[str] = None
@@ -161,6 +163,7 @@ class FieldCaseDownloadResponse(FieldCaseDownloadCreate):
 @router.post("/sia/field-case-downloads", response_model=FieldCaseDownloadResponse, status_code=201, tags=["SIA - Android Field Ops"])
 async def create_field_case_download(data: FieldCaseDownloadCreate):
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_field_case_download")
     await download_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/cases/{case_id}/field-case-downloads", response_model=List[FieldCaseDownloadResponse], tags=["SIA - Android Field Ops"])
@@ -171,7 +174,7 @@ async def get_downloads_by_case(case_id: str):
 # SIA_FIELD_SESSION
 # ════════════════════════════════════════════════════════════
 
-class FieldSessionCreate(BaseModel):
+class FieldSessionCreate(SIAScope):
     field_case_download_id: str = Field(...)
     survey_visit_id:        str = Field(...)
     user_id:                Optional[str] = Field(None, description="FK → users._id")
@@ -190,6 +193,7 @@ class FieldSessionResponse(FieldSessionCreate):
 async def create_field_session(data: FieldSessionCreate):
     await req(download_col, data.field_case_download_id, "Field Case Download")
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_field_session")
     await session_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/field-sessions/{session_id}", response_model=FieldSessionResponse, tags=["SIA - Android Field Ops"])
@@ -206,7 +210,7 @@ async def get_sessions_by_download(download_id: str):
 # SIA_MOBILE_FORM_RESPONSE
 # ════════════════════════════════════════════════════════════
 
-class MobileFormResponseCreate(BaseModel):
+class MobileFormResponseCreate(SIAScope):
     field_session_id:    str = Field(...)
     assessment_pack_id:  Optional[str] = None
     poi_id:              Optional[str] = None
@@ -225,6 +229,7 @@ class MobileFormResponseResponse(MobileFormResponseCreate):
 async def create_form_response(data: MobileFormResponseCreate):
     await req(session_col, data.field_session_id, "Field Session")
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_mobile_form_response")
     await form_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/field-sessions/{session_id}/form-responses", response_model=List[MobileFormResponseResponse], tags=["SIA - Android Field Ops"])
@@ -235,7 +240,7 @@ async def get_form_responses(session_id: str):
 # SIA_MOBILE_POI_CAPTURE
 # ════════════════════════════════════════════════════════════
 
-class MobilePOICaptureCreate(BaseModel):
+class MobilePOICaptureCreate(SIAScope):
     field_session_id: str = Field(...)
     poi_id:           str = Field(...)
     geometry_type:    Optional[str] = Field(None, max_length=50)
@@ -251,6 +256,7 @@ class MobilePOICaptureResponse(MobilePOICaptureCreate):
 async def create_poi_capture(data: MobilePOICaptureCreate):
     await req(session_col, data.field_session_id, "Field Session")
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_mobile_poi_capture")
     await poi_cap_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/field-sessions/{session_id}/poi-captures", response_model=List[MobilePOICaptureResponse], tags=["SIA - Android Field Ops"])
@@ -261,7 +267,7 @@ async def get_poi_captures(session_id: str):
 # SIA_MOBILE_PHOTO_CAPTURE
 # ════════════════════════════════════════════════════════════
 
-class MobilePhotoCaptureCreate(BaseModel):
+class MobilePhotoCaptureCreate(SIAScope):
     field_session_id: str = Field(...)
     poi_id:           Optional[str] = None
     file_name:        Optional[str] = Field(None, max_length=255)
@@ -282,6 +288,7 @@ class MobilePhotoCaptureResponse(MobilePhotoCaptureCreate):
 async def create_photo_capture(data: MobilePhotoCaptureCreate):
     await req(session_col, data.field_session_id, "Field Session")
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_mobile_photo_capture")
     await photo_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/field-sessions/{session_id}/photo-captures", response_model=List[MobilePhotoCaptureResponse], tags=["SIA - Android Field Ops"])
@@ -292,7 +299,7 @@ async def get_photo_captures(session_id: str):
 # SIA_MOBILE_VIDEO_CAPTURE
 # ════════════════════════════════════════════════════════════
 
-class MobileVideoCaptureCreate(BaseModel):
+class MobileVideoCaptureCreate(SIAScope):
     field_session_id: str = Field(...)
     poi_id:           Optional[str] = None
     file_name:        Optional[str] = Field(None, max_length=255)
@@ -311,6 +318,7 @@ class MobileVideoCaptureResponse(MobileVideoCaptureCreate):
 async def create_video_capture(data: MobileVideoCaptureCreate):
     await req(session_col, data.field_session_id, "Field Session")
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_mobile_video_capture")
     await video_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/field-sessions/{session_id}/video-captures", response_model=List[MobileVideoCaptureResponse], tags=["SIA - Android Field Ops"])
@@ -321,7 +329,7 @@ async def get_video_captures(session_id: str):
 # SIA_MOBILE_MEASUREMENT
 # ════════════════════════════════════════════════════════════
 
-class MobileMeasurementCreate(BaseModel):
+class MobileMeasurementCreate(SIAScope):
     field_session_id:    str = Field(...)
     poi_id:              Optional[str] = None
     instrument_id:       Optional[str] = None
@@ -345,6 +353,7 @@ class MobileMeasurementResponse(MobileMeasurementCreate):
 async def create_measurement(data: MobileMeasurementCreate):
     await req(session_col, data.field_session_id, "Field Session")
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_mobile_measurement")
     await measure_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/field-sessions/{session_id}/measurements", response_model=List[MobileMeasurementResponse], tags=["SIA - Android Field Ops"])
@@ -355,7 +364,7 @@ async def get_measurements(session_id: str):
 # SIA_MOBILE_NAMEPLATE_CAPTURE
 # ════════════════════════════════════════════════════════════
 
-class MobileNameplateCaptureCreate(BaseModel):
+class MobileNameplateCaptureCreate(SIAScope):
     field_session_id: str = Field(...)
     poi_id:           Optional[str] = None
     image_file_path:  Optional[str] = None
@@ -373,6 +382,7 @@ class MobileNameplateCaptureResponse(MobileNameplateCaptureCreate):
 async def create_nameplate_capture(data: MobileNameplateCaptureCreate):
     await req(session_col, data.field_session_id, "Field Session")
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_mobile_nameplate_capture")
     await nameplate_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/field-sessions/{session_id}/nameplate-captures", response_model=List[MobileNameplateCaptureResponse], tags=["SIA - Android Field Ops"])
@@ -383,7 +393,7 @@ async def get_nameplate_captures(session_id: str):
 # SIA_MOBILE_VOICE_NOTE
 # ════════════════════════════════════════════════════════════
 
-class MobileVoiceNoteCreate(BaseModel):
+class MobileVoiceNoteCreate(SIAScope):
     field_session_id:     str = Field(...)
     poi_id:               Optional[str] = None
     audio_file_path:      Optional[str] = None
@@ -399,6 +409,7 @@ class MobileVoiceNoteResponse(MobileVoiceNoteCreate):
 async def create_voice_note(data: MobileVoiceNoteCreate):
     await req(session_col, data.field_session_id, "Field Session")
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_mobile_voice_note")
     await voice_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/field-sessions/{session_id}/voice-notes", response_model=List[MobileVoiceNoteResponse], tags=["SIA - Android Field Ops"])
@@ -409,7 +420,7 @@ async def get_voice_notes(session_id: str):
 # SIA_MOBILE_SKETCH
 # ════════════════════════════════════════════════════════════
 
-class MobileSketchCreate(BaseModel):
+class MobileSketchCreate(SIAScope):
     field_session_id: str = Field(...)
     poi_id:           Optional[str] = None
     sketch_type:      Optional[str] = Field(None, max_length=100)
@@ -424,6 +435,7 @@ class MobileSketchResponse(MobileSketchCreate):
 async def create_sketch(data: MobileSketchCreate):
     await req(session_col, data.field_session_id, "Field Session")
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_mobile_sketch")
     await sketch_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/field-sessions/{session_id}/sketches", response_model=List[MobileSketchResponse], tags=["SIA - Android Field Ops"])
@@ -436,7 +448,7 @@ async def get_sketches(session_id: str):
 
 AI_CHECK_TYPES = ["IMAGE_BLUR","DUPLICATE_IMAGE","OCR","MISSING_EVIDENCE","VALUE_CONFLICT","GPS_PLAUSIBILITY"]
 
-class MobileAICheckCreate(BaseModel):
+class MobileAICheckCreate(SIAScope):
     field_session_id:  str = Field(...)
     check_type:        Optional[str] = Field(None, max_length=100,
                            description=f"One of: {', '.join(AI_CHECK_TYPES)}")
@@ -455,6 +467,7 @@ class MobileAICheckResponse(MobileAICheckCreate):
 async def create_ai_check(data: MobileAICheckCreate):
     await req(session_col, data.field_session_id, "Field Session")
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_mobile_ai_check")
     await ai_check_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/field-sessions/{session_id}/ai-checks", response_model=List[MobileAICheckResponse], tags=["SIA - Android Field Ops"])
@@ -467,7 +480,7 @@ async def get_ai_checks(session_id: str):
 
 EV_STATUSES = ["COLLECTED","NOT_APPLICABLE","INACCESSIBLE_UNSAFE","UNKNOWN","DATA_GAP"]
 
-class RequiredEvidenceStatusCreate(BaseModel):
+class RequiredEvidenceStatusCreate(SIAScope):
     field_session_id:      str = Field(...)
     survey_requirement_id: str = Field(...)
     poi_id:                Optional[str] = None
@@ -486,6 +499,7 @@ class RequiredEvidenceStatusResponse(RequiredEvidenceStatusCreate):
 async def create_required_evidence_status(data: RequiredEvidenceStatusCreate):
     await req(session_col, data.field_session_id, "Field Session")
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_required_evidence_status")
     await req_ev_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/field-sessions/{session_id}/required-evidence-status", response_model=List[RequiredEvidenceStatusResponse], tags=["SIA - Android Field Ops"])
@@ -496,7 +510,7 @@ async def get_required_evidence_status(session_id: str):
 # SIA_SITE_EXIT_GATE
 # ════════════════════════════════════════════════════════════
 
-class SiteExitGateCreate(BaseModel):
+class SiteExitGateCreate(SIAScope):
     field_session_id:  str = Field(...)
     survey_visit_id:   str = Field(...)
     mandatory_count:   Optional[int] = None
@@ -516,6 +530,7 @@ class SiteExitGateResponse(SiteExitGateCreate):
 async def create_site_exit_gate(data: SiteExitGateCreate):
     await req(session_col, data.field_session_id, "Field Session")
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_site_exit_gate")
     await exit_gate_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/field-sessions/{session_id}/site-exit-gates", response_model=List[SiteExitGateResponse], tags=["SIA - Android Field Ops"])
@@ -526,7 +541,7 @@ async def get_site_exit_gates(session_id: str):
 # SIA_MOBILE_STORAGE_STATUS
 # ════════════════════════════════════════════════════════════
 
-class MobileStorageStatusCreate(BaseModel):
+class MobileStorageStatusCreate(SIAScope):
     device_id:           str = Field(...)
     field_session_id:    Optional[str] = None
     total_storage_mb:    Optional[int] = None
@@ -542,6 +557,7 @@ class MobileStorageStatusResponse(MobileStorageStatusCreate):
 @router.post("/sia/mobile-storage-status", response_model=MobileStorageStatusResponse, status_code=201, tags=["SIA - Android Field Ops"])
 async def create_storage_status(data: MobileStorageStatusCreate):
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_mobile_storage_status")
     await storage_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/mobile-devices/{device_id}/storage-status", response_model=List[MobileStorageStatusResponse], tags=["SIA - Android Field Ops"])
@@ -552,7 +568,7 @@ async def get_storage_status(device_id: str):
 # SIA_SYNC_QUEUE
 # ════════════════════════════════════════════════════════════
 
-class SyncQueueCreate(BaseModel):
+class SyncQueueCreate(SIAScope):
     device_id:        str = Field(...)
     field_session_id: Optional[str] = None
     operation_type:   Optional[str] = Field(None, max_length=100)
@@ -570,6 +586,7 @@ class SyncQueueResponse(SyncQueueCreate):
 @router.post("/sia/sync-queue", response_model=SyncQueueResponse, status_code=201, tags=["SIA - Android Field Ops"])
 async def create_sync_queue_item(data: SyncQueueCreate):
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_sync_queue")
     await sync_q_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/mobile-devices/{device_id}/sync-queue", response_model=List[SyncQueueResponse], tags=["SIA - Android Field Ops"])
@@ -580,7 +597,7 @@ async def get_sync_queue(device_id: str):
 # SIA_SYNC_BATCH
 # ════════════════════════════════════════════════════════════
 
-class SyncBatchCreate(BaseModel):
+class SyncBatchCreate(SIAScope):
     device_id:          str = Field(...)
     field_session_id:   Optional[str] = None
     batch_code:         str = Field(..., max_length=100)
@@ -598,6 +615,7 @@ class SyncBatchResponse(SyncBatchCreate):
 @router.post("/sia/sync-batches", response_model=SyncBatchResponse, status_code=201, tags=["SIA - Android Field Ops"])
 async def create_sync_batch(data: SyncBatchCreate):
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_sync_batch")
     await sync_batch_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/mobile-devices/{device_id}/sync-batches", response_model=List[SyncBatchResponse], tags=["SIA - Android Field Ops"])
@@ -608,7 +626,7 @@ async def get_sync_batches(device_id: str):
 # SIA_SYNC_CONFLICT
 # ════════════════════════════════════════════════════════════
 
-class SyncConflictCreate(BaseModel):
+class SyncConflictCreate(SIAScope):
     sync_batch_id:     str = Field(...)
     record_type:       Optional[str] = Field(None, max_length=100)
     record_id:         Optional[str] = None
@@ -626,6 +644,7 @@ class SyncConflictResponse(SyncConflictCreate):
 async def create_sync_conflict(data: SyncConflictCreate):
     await req(sync_batch_col, data.sync_batch_id, "Sync Batch")
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_sync_conflict")
     await sync_conflict_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/sync-batches/{batch_id}/conflicts", response_model=List[SyncConflictResponse], tags=["SIA - Android Field Ops"])
@@ -636,7 +655,7 @@ async def get_sync_conflicts(batch_id: str):
 # SIA_SYNC_INTEGRITY_RECEIPT
 # ════════════════════════════════════════════════════════════
 
-class SyncIntegrityReceiptCreate(BaseModel):
+class SyncIntegrityReceiptCreate(SIAScope):
     sync_batch_id:      str = Field(...)
     receipt_code:       Optional[str] = Field(None, max_length=100)
     manifest_hash:      Optional[str] = Field(None, max_length=255)
@@ -653,6 +672,7 @@ class SyncIntegrityReceiptResponse(SyncIntegrityReceiptCreate):
 async def create_integrity_receipt(data: SyncIntegrityReceiptCreate):
     await req(sync_batch_col, data.sync_batch_id, "Sync Batch")
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_sync_integrity_receipt")
     await integrity_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/sync-batches/{batch_id}/integrity-receipts", response_model=List[SyncIntegrityReceiptResponse], tags=["SIA - Android Field Ops"])
@@ -663,7 +683,7 @@ async def get_integrity_receipts(batch_id: str):
 # SIA_PORTABLE_DATA_PACK
 # ════════════════════════════════════════════════════════════
 
-class PortableDataPackCreate(BaseModel):
+class PortableDataPackCreate(SIAScope):
     sia_case_id:      str = Field(...)
     site_id:          str = Field(...)
     survey_visit_id:  Optional[str] = None
@@ -684,6 +704,7 @@ class PortableDataPackResponse(PortableDataPackCreate):
 @router.post("/sia/portable-data-packs", response_model=PortableDataPackResponse, status_code=201, tags=["SIA - Android Field Ops"])
 async def create_portable_data_pack(data: PortableDataPackCreate):
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_portable_data_pack")
     await pack_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/portable-data-packs/{pack_id}", response_model=PortableDataPackResponse, tags=["SIA - Android Field Ops"])
@@ -700,7 +721,7 @@ async def get_packs_by_case(case_id: str):
 # SIA_DEVICE_AUDIT
 # ════════════════════════════════════════════════════════════
 
-class DeviceAuditCreate(BaseModel):
+class DeviceAuditCreate(SIAScope):
     device_id:        str = Field(...)
     user_id:          Optional[str] = Field(None, description="FK → users._id")
     field_session_id: Optional[str] = None
@@ -717,6 +738,7 @@ class DeviceAuditResponse(DeviceAuditCreate):
 @router.post("/sia/device-audits", response_model=DeviceAuditResponse, status_code=201, tags=["SIA - Android Field Ops"])
 async def create_device_audit(data: DeviceAuditCreate):
     doc = {"_id": nid(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_device_audit")
     await audit_col.insert_one(doc); return s(doc)
 
 @router.get("/sia/mobile-devices/{device_id}/audits", response_model=List[DeviceAuditResponse], tags=["SIA - Android Field Ops"])

@@ -6,6 +6,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 
 from dotenv import load_dotenv
+from .scope import PARENTS
 
 load_dotenv(override=True)
 
@@ -39,7 +40,7 @@ SCOPE_FIELDS = (
     "constraint_id",
     "source_fact_id",
 )
-PROTECTED_FIELDS = {"_id", "created_at", "updated_at"}
+PROTECTED_FIELDS = {"_id", "created_at", "updated_at", *SCOPE_FIELDS, *PARENTS}
 
 
 def serialize(doc: dict) -> dict:
@@ -77,6 +78,12 @@ async def collect_package(case_id: str, site_id: str) -> Dict[str, List[dict]]:
         for name in collection_names:
             cursor = db[name].find(scoped_query(known_ids))
             for document in await cursor.to_list(length=5000):
+                if document.get("site_id") not in (None, site_id):
+                    continue
+                if document.get("sia_case_id") not in (None, case_id):
+                    continue
+                if name == "sia_site" and str(document["_id"]) != site_id:
+                    continue
                 package[name][str(document["_id"])] = document
                 known_ids.add(str(document["_id"]))
         if len(known_ids) == before:

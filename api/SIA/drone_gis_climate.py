@@ -1,5 +1,6 @@
+from .scope import SIAScope, apply_scope
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import Field
 from typing import Optional, List
 from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -82,7 +83,7 @@ async def require_mission(mid: str):
 # SIA_DRONE_MISSION
 # ════════════════════════════════════════════════════════════
 
-class DroneMissionCreate(BaseModel):
+class DroneMissionCreate(SIAScope):
     site_id:            str = Field(..., description="FK → sia_site._id (NOT NULL)")
     survey_visit_id:    Optional[str] = None
     mission_code:       str = Field(..., max_length=50)
@@ -106,6 +107,7 @@ def _mission(doc) -> dict:
              status_code=201, tags=["SIA - Drone, GIS & Climate"])
 async def create_drone_mission(data: DroneMissionCreate):
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_drone_mission")
     await mission_col.insert_one(doc)
     return _mission(doc)
 
@@ -128,7 +130,7 @@ async def get_missions_by_site(site_id: str):
 # SIA_DRONE_OPERATOR
 # ════════════════════════════════════════════════════════════
 
-class DroneOperatorCreate(BaseModel):
+class DroneOperatorCreate(SIAScope):
     drone_mission_id:   str = Field(..., description="FK → sia_drone_mission._id (NOT NULL)")
     user_id:            Optional[str] = Field(None, description="FK → users._id")
     competency_ref:     Optional[str] = Field(None, max_length=100)
@@ -150,6 +152,7 @@ def _generic(doc) -> dict:
 async def create_drone_operator(data: DroneOperatorCreate):
     await require_mission(data.drone_mission_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_drone_operator")
     await operator_col.insert_one(doc)
     return _generic(doc)
 
@@ -165,7 +168,7 @@ async def get_operators(mission_id: str):
 # SIA_DRONE_PLATFORM
 # ════════════════════════════════════════════════════════════
 
-class DronePlatformCreate(BaseModel):
+class DronePlatformCreate(SIAScope):
     drone_mission_id:       str = Field(...)
     drone_make:             Optional[str] = Field(None, max_length=100)
     drone_model:            Optional[str] = Field(None, max_length=100)
@@ -186,6 +189,7 @@ class DronePlatformResponse(DronePlatformCreate):
 async def create_drone_platform(data: DronePlatformCreate):
     await require_mission(data.drone_mission_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_drone_platform")
     await platform_col.insert_one(doc)
     return _generic(doc)
 
@@ -201,7 +205,7 @@ async def get_platforms(mission_id: str):
 # SIA_DRONE_CAPTURE_PLAN
 # ════════════════════════════════════════════════════════════
 
-class DroneCapturePlanCreate(BaseModel):
+class DroneCapturePlanCreate(SIAScope):
     drone_mission_id:   str = Field(...)
     crs:                Optional[str] = Field(None, max_length=100)
     datum:              Optional[str] = Field(None, max_length=100)
@@ -224,6 +228,7 @@ class DroneCapturePlanResponse(DroneCapturePlanCreate):
 async def create_capture_plan(data: DroneCapturePlanCreate):
     await require_mission(data.drone_mission_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_drone_capture_plan")
     await capture_plan_col.insert_one(doc)
     return _generic(doc)
 
@@ -239,7 +244,7 @@ async def get_capture_plans(mission_id: str):
 # SIA_GROUND_CONTROL_POINT
 # ════════════════════════════════════════════════════════════
 
-class GroundControlPointCreate(BaseModel):
+class GroundControlPointCreate(SIAScope):
     drone_mission_id:   str = Field(...)
     gcp_code:           Optional[str] = Field(None, max_length=50)
     point_type:         Optional[str] = Field(None, max_length=50)
@@ -259,6 +264,7 @@ class GroundControlPointResponse(GroundControlPointCreate):
 async def create_gcp(data: GroundControlPointCreate):
     await require_mission(data.drone_mission_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_ground_control_point")
     await gcp_col.insert_one(doc)
     return _generic(doc)
 
@@ -274,7 +280,7 @@ async def get_gcps(mission_id: str):
 # SIA_DRONE_FIELD_CONDITION
 # ════════════════════════════════════════════════════════════
 
-class DroneFieldConditionCreate(BaseModel):
+class DroneFieldConditionCreate(SIAScope):
     drone_mission_id:   str = Field(...)
     recorded_at:        Optional[str] = None
     weather_condition:  Optional[str] = Field(None, max_length=100)
@@ -294,6 +300,7 @@ class DroneFieldConditionResponse(DroneFieldConditionCreate):
 async def create_field_condition(data: DroneFieldConditionCreate):
     await require_mission(data.drone_mission_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_drone_field_condition")
     await field_cond_col.insert_one(doc)
     return _generic(doc)
 
@@ -309,7 +316,7 @@ async def get_field_conditions(mission_id: str):
 # SIA_DRONE_RAW_DATA
 # ════════════════════════════════════════════════════════════
 
-class DroneRawDataCreate(BaseModel):
+class DroneRawDataCreate(SIAScope):
     drone_mission_id:   str = Field(...)
     data_type:          Optional[str] = Field(None, max_length=50)
     file_name:          Optional[str] = Field(None, max_length=255)
@@ -328,6 +335,7 @@ class DroneRawDataResponse(DroneRawDataCreate):
 async def create_raw_data(data: DroneRawDataCreate):
     await require_mission(data.drone_mission_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_drone_raw_data")
     await raw_data_col.insert_one(doc)
     return _generic(doc)
 
@@ -343,7 +351,7 @@ async def get_raw_data(mission_id: str):
 # SIA_DRONE_QUALITY_CHECK
 # ════════════════════════════════════════════════════════════
 
-class DroneQualityCheckCreate(BaseModel):
+class DroneQualityCheckCreate(SIAScope):
     drone_mission_id:       str = Field(...)
     coverage_status:        Optional[str] = Field(None, max_length=50)
     gap_detected:           Optional[bool] = None
@@ -366,6 +374,7 @@ class DroneQualityCheckResponse(DroneQualityCheckCreate):
 async def create_quality_check(data: DroneQualityCheckCreate):
     await require_mission(data.drone_mission_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_drone_quality_check")
     await quality_col.insert_one(doc)
     return _generic(doc)
 
@@ -384,7 +393,7 @@ async def get_quality_checks(mission_id: str):
 PRODUCT_TYPES = ["ORTHOMOSAIC", "POINT_CLOUD", "DSM", "DTM",
                  "CONTOUR", "3D_MESH", "THERMAL"]
 
-class DroneDerivedProductCreate(BaseModel):
+class DroneDerivedProductCreate(SIAScope):
     drone_mission_id:   str = Field(...)
     product_type:       Optional[str] = Field(None, max_length=100,
                             description=f"One of: {', '.join(PRODUCT_TYPES)}")
@@ -406,6 +415,7 @@ class DroneDerivedProductResponse(DroneDerivedProductCreate):
 async def create_derived_product(data: DroneDerivedProductCreate):
     await require_mission(data.drone_mission_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_drone_derived_product")
     await derived_col.insert_one(doc)
     return _generic(doc)
 
@@ -421,7 +431,7 @@ async def get_derived_products(mission_id: str):
 # SIA_GIS_LAYER
 # ════════════════════════════════════════════════════════════
 
-class GISLayerCreate(BaseModel):
+class GISLayerCreate(SIAScope):
     site_id:            str = Field(..., description="FK → sia_site._id (NOT NULL)")
     layer_name:         Optional[str] = Field(None, max_length=150)
     layer_type:         Optional[str] = Field(None, max_length=100)
@@ -442,6 +452,7 @@ class GISLayerResponse(GISLayerCreate):
              status_code=201, tags=["SIA - Drone, GIS & Climate"])
 async def create_gis_layer(data: GISLayerCreate):
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_gis_layer")
     await gis_layer_col.insert_one(doc)
     return _generic(doc)
 
@@ -464,7 +475,7 @@ async def get_gis_layers_by_site(site_id: str):
 # SIA_GIS_FEATURE
 # ════════════════════════════════════════════════════════════
 
-class GISFeatureCreate(BaseModel):
+class GISFeatureCreate(SIAScope):
     gis_layer_id:       str = Field(..., description="FK → sia_gis_layer._id (NOT NULL)")
     poi_id:             Optional[str] = Field(None, description="FK → sia_poi._id")
     feature_code:       Optional[str] = Field(None, max_length=50)
@@ -484,6 +495,7 @@ async def create_gis_feature(data: GISFeatureCreate):
     layer = await gis_layer_col.find_one({"_id": data.gis_layer_id})
     if not layer: not_found("GIS Layer", data.gis_layer_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_gis_feature")
     await gis_feature_col.insert_one(doc)
     return _generic(doc)
 
@@ -499,7 +511,7 @@ async def get_gis_features(layer_id: str):
 # SIA_EXTERNAL_GEO_SOURCE
 # ════════════════════════════════════════════════════════════
 
-class ExternalGeoSourceCreate(BaseModel):
+class ExternalGeoSourceCreate(SIAScope):
     site_id:            str = Field(..., description="FK → sia_site._id (NOT NULL)")
     provider_name:      Optional[str] = Field(None, max_length=150)
     dataset_name:       Optional[str] = Field(None, max_length=150)
@@ -518,6 +530,7 @@ class ExternalGeoSourceResponse(ExternalGeoSourceCreate):
              status_code=201, tags=["SIA - Drone, GIS & Climate"])
 async def create_external_geo_source(data: ExternalGeoSourceCreate):
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_external_geo_source")
     await ext_geo_col.insert_one(doc)
     return _generic(doc)
 
@@ -536,7 +549,7 @@ async def get_external_geo_sources(site_id: str):
 CLIMATE_TYPES = ["SOLAR_RESOURCE", "TEMPERATURE", "RAINFALL",
                  "WIND", "HUMIDITY", "MARINE_CORROSION"]
 
-class ClimateResourceCreate(BaseModel):
+class ClimateResourceCreate(SIAScope):
     site_id:                str = Field(..., description="FK → sia_site._id (NOT NULL)")
     external_geo_source_id: Optional[str] = Field(None, description="FK → sia_external_geo_source._id")
     resource_type:          Optional[str] = Field(None, max_length=100,
@@ -558,6 +571,7 @@ class ClimateResourceResponse(ClimateResourceCreate):
              status_code=201, tags=["SIA - Drone, GIS & Climate"])
 async def create_climate_resource(data: ClimateResourceCreate):
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_climate_resource")
     await climate_col.insert_one(doc)
     return _generic(doc)
 

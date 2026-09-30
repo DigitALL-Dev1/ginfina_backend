@@ -1,5 +1,6 @@
+from .scope import SIAScope, apply_scope
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import Field
 from typing import Optional, List
 from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -74,7 +75,7 @@ async def require_ea(ea_id: str):
 # SIA_ENGINEERING_ASSESSMENT  (parent)
 # ════════════════════════════════════════════════════════════
 
-class EngineeringAssessmentCreate(BaseModel):
+class EngineeringAssessmentCreate(SIAScope):
     sia_case_id:       str = Field(..., description="FK → sia_case._id (NOT NULL)")
     site_id:           str = Field(..., description="FK → sia_site._id (NOT NULL)")
     assessment_code:   str = Field(..., max_length=50)
@@ -85,7 +86,7 @@ class EngineeringAssessmentCreate(BaseModel):
     status:            Optional[str] = Field(None, max_length=50)
     summary:           Optional[str] = None
 
-class EngineeringAssessmentResponse(BaseModel):
+class EngineeringAssessmentResponse(SIAScope):
     id: str
     sia_case_id:       str
     site_id:           str
@@ -112,6 +113,7 @@ def _ea(doc) -> dict:
              status_code=201, tags=["SIA - Engineering Assessment"])
 async def create_engineering_assessment(data: EngineeringAssessmentCreate):
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_engineering_assessment")
     await ea_col.insert_one(doc)
     return _ea(doc)
 
@@ -141,7 +143,7 @@ async def get_assessments_by_site(site_id: str):
 # SIA_ELECTRICAL_ASSESSMENT
 # ════════════════════════════════════════════════════════════
 
-class ElectricalAssessmentCreate(BaseModel):
+class ElectricalAssessmentCreate(SIAScope):
     engineering_assessment_id: str = Field(...)
     supply_type:          Optional[str] = Field(None, max_length=100)
     voltage:              Optional[float] = None
@@ -174,6 +176,7 @@ _elec = _child("elec")
 async def create_electrical_assessment(data: ElectricalAssessmentCreate):
     await require_ea(data.engineering_assessment_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_electrical_assessment")
     await elec_col.insert_one(doc)
     return _elec(doc)
 
@@ -189,7 +192,7 @@ async def get_electrical_assessments(ea_id: str):
 # SIA_CIVIL_ASSESSMENT
 # ════════════════════════════════════════════════════════════
 
-class CivilAssessmentCreate(BaseModel):
+class CivilAssessmentCreate(SIAScope):
     engineering_assessment_id: str = Field(...)
     ground_condition:     Optional[str] = Field(None, max_length=100)
     foundation_condition: Optional[str] = Field(None, max_length=100)
@@ -212,6 +215,7 @@ _civil = _child("civil")
 async def create_civil_assessment(data: CivilAssessmentCreate):
     await require_ea(data.engineering_assessment_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_civil_assessment")
     await civil_col.insert_one(doc)
     return _civil(doc)
 
@@ -227,7 +231,7 @@ async def get_civil_assessments(ea_id: str):
 # SIA_STRUCTURAL_ASSESSMENT
 # ════════════════════════════════════════════════════════════
 
-class StructuralAssessmentCreate(BaseModel):
+class StructuralAssessmentCreate(SIAScope):
     engineering_assessment_id: str = Field(...)
     structure_type:       Optional[str] = Field(None, max_length=100)
     roof_type:            Optional[str] = Field(None, max_length=100)
@@ -250,6 +254,7 @@ _struct = _child("struct")
 async def create_structural_assessment(data: StructuralAssessmentCreate):
     await require_ea(data.engineering_assessment_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_structural_assessment")
     await struct_col.insert_one(doc)
     return _struct(doc)
 
@@ -265,7 +270,7 @@ async def get_structural_assessments(ea_id: str):
 # SIA_MECHANICAL_ASSESSMENT
 # ════════════════════════════════════════════════════════════
 
-class MechanicalAssessmentCreate(BaseModel):
+class MechanicalAssessmentCreate(SIAScope):
     engineering_assessment_id: str = Field(...)
     equipment_zone:         Optional[str] = Field(None, max_length=150)
     plant_condition:        Optional[str] = Field(None, max_length=100)
@@ -288,6 +293,7 @@ _mech = _child("mech")
 async def create_mechanical_assessment(data: MechanicalAssessmentCreate):
     await require_ea(data.engineering_assessment_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_mechanical_assessment")
     await mech_col.insert_one(doc)
     return _mech(doc)
 
@@ -303,7 +309,7 @@ async def get_mechanical_assessments(ea_id: str):
 # SIA_WATER_PUMPING_ASSESSMENT
 # ════════════════════════════════════════════════════════════
 
-class WaterPumpingAssessmentCreate(BaseModel):
+class WaterPumpingAssessmentCreate(SIAScope):
     engineering_assessment_id: str = Field(...)
     water_source_type:    Optional[str] = Field(None, max_length=100)
     daily_water_demand:   Optional[float] = None
@@ -332,6 +338,7 @@ _water = _child("water")
 async def create_water_pumping_assessment(data: WaterPumpingAssessmentCreate):
     await require_ea(data.engineering_assessment_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_water_pumping_assessment")
     await water_col.insert_one(doc)
     return _water(doc)
 
@@ -347,7 +354,7 @@ async def get_water_pumping_assessments(ea_id: str):
 # SIA_SCADA_COMMUNICATION_ASSESSMENT
 # ════════════════════════════════════════════════════════════
 
-class ScadaCommunicationAssessmentCreate(BaseModel):
+class ScadaCommunicationAssessmentCreate(SIAScope):
     engineering_assessment_id: str = Field(...)
     control_system_type:   Optional[str] = Field(None, max_length=100)
     scada_available:       Optional[bool] = None
@@ -371,6 +378,7 @@ _scada = _child("scada")
 async def create_scada_assessment(data: ScadaCommunicationAssessmentCreate):
     await require_ea(data.engineering_assessment_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_scada_communication_assessment")
     await scada_col.insert_one(doc)
     return _scada(doc)
 
@@ -386,7 +394,7 @@ async def get_scada_assessments(ea_id: str):
 # SIA_HSE_ENVIRONMENT_ASSESSMENT
 # ════════════════════════════════════════════════════════════
 
-class HseEnvironmentAssessmentCreate(BaseModel):
+class HseEnvironmentAssessmentCreate(SIAScope):
     engineering_assessment_id: str = Field(...)
     environmental_condition:   Optional[str] = None
     hazard_level:              Optional[str] = Field(None, max_length=50)
@@ -410,6 +418,7 @@ _hse = _child("hse")
 async def create_hse_assessment(data: HseEnvironmentAssessmentCreate):
     await require_ea(data.engineering_assessment_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_hse_environment_assessment")
     await hse_col.insert_one(doc)
     return _hse(doc)
 
@@ -425,7 +434,7 @@ async def get_hse_assessments(ea_id: str):
 # SIA_INDUSTRIAL_ASSESSMENT
 # ════════════════════════════════════════════════════════════
 
-class IndustrialAssessmentCreate(BaseModel):
+class IndustrialAssessmentCreate(SIAScope):
     engineering_assessment_id: str = Field(...)
     equipment_name:     Optional[str] = Field(None, max_length=150)
     process_type:       Optional[str] = Field(None, max_length=100)
@@ -449,6 +458,7 @@ _industrial = _child("industrial")
 async def create_industrial_assessment(data: IndustrialAssessmentCreate):
     await require_ea(data.engineering_assessment_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_industrial_assessment")
     await industrial_col.insert_one(doc)
     return _industrial(doc)
 
@@ -464,7 +474,7 @@ async def get_industrial_assessments(ea_id: str):
 # SIA_ENGINEERING_FINDING
 # ════════════════════════════════════════════════════════════
 
-class EngineeringFindingCreate(BaseModel):
+class EngineeringFindingCreate(SIAScope):
     engineering_assessment_id: str = Field(...)
     poi_id:             Optional[str] = None
     finding_code:       Optional[str] = Field(None, max_length=50)
@@ -487,6 +497,7 @@ _finding = _child("finding")
 async def create_engineering_finding(data: EngineeringFindingCreate):
     await require_ea(data.engineering_assessment_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_engineering_finding")
     await finding_col.insert_one(doc)
     return _finding(doc)
 
@@ -502,7 +513,7 @@ async def get_findings(ea_id: str):
 # SIA_ENGINEERING_GAP
 # ════════════════════════════════════════════════════════════
 
-class EngineeringGapCreate(BaseModel):
+class EngineeringGapCreate(SIAScope):
     engineering_assessment_id: str = Field(...)
     gap_code:       Optional[str] = Field(None, max_length=50)
     gap_type:       Optional[str] = Field(None, max_length=100)
@@ -524,6 +535,7 @@ _gap = _child("gap")
 async def create_engineering_gap(data: EngineeringGapCreate):
     await require_ea(data.engineering_assessment_id)
     doc = {"_id": new_id(), **data.model_dump(), "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_engineering_gap")
     await gap_col.insert_one(doc)
     return _gap(doc)
 
@@ -539,7 +551,7 @@ async def get_gaps(ea_id: str):
 # SIA_ENGINEERING_REVIEW
 # ════════════════════════════════════════════════════════════
 
-class EngineeringReviewCreate(BaseModel):
+class EngineeringReviewCreate(SIAScope):
     engineering_assessment_id: str = Field(...)
     reviewer_user_id:    Optional[str] = None
     review_status:       Optional[str] = Field(None, max_length=50)
@@ -562,6 +574,7 @@ async def create_engineering_review(data: EngineeringReviewCreate):
     if not payload.get("reviewed_at"):
         payload["reviewed_at"] = datetime.utcnow().isoformat()
     doc = {"_id": new_id(), **payload, "created_at": datetime.utcnow()}
+    await apply_scope(db, doc, "sia_engineering_review")
     await review_col.insert_one(doc)
     return _review(doc)
 

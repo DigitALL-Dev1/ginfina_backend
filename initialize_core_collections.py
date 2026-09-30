@@ -33,7 +33,7 @@ async def seed_dummy_project(auth, project):
     timestamp = datetime.now(timezone.utc)
     data = {
         "_id": identity,
-        "gsolve_project_id": -1,  # Dummy placeholder; not a real Gsolve project.
+        "gsolve_project_id": 12,  # Dummy placeholder; not a real Gsolve project.
         "project_code": code,
         "project_name": "Hospital Solar Project",
         "project_status": "ACTIVE",
