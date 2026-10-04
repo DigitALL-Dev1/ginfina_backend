@@ -3,10 +3,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from api.auth import router as auth_router
 from api.project import router as project_router
+from api.consultant import router as consultant_router
 from api.SIA.sia_case import router as sia_case_router
 from api.SIA.site_survey import router as site_survey_router
 from api.SIA.Engineering_Assessment import router as ea_router
-from api.SIA.drone_gis_climate import router as drone_gis_router
+from api.SIA.drone import router as drone_router
+from api.SIA.gis import router as gis_router
+from api.SIA.climate import router as climate_router
 from api.SIA.evidence_ai_readiness import router as evidence_router
 from api.SIA.seb_ewb_handoff import router as seb_router
 from api.SIA.android_field_ops import router as android_router
@@ -48,10 +51,13 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Include routers
 app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(project_router, prefix="/api", tags=["Projects"])
+app.include_router(consultant_router, prefix="/api", tags=["Consultants"])
 app.include_router(sia_case_router, prefix="/api", tags=["SIA"])
 app.include_router(site_survey_router, prefix="/api", tags=["SIA - Sites & Survey"])
 app.include_router(ea_router, prefix="/api", tags=["SIA - Engineering Assessment"])
-app.include_router(drone_gis_router, prefix="/api", tags=["SIA - Drone, GIS & Climate"])
+app.include_router(drone_router, prefix="/api", tags=["SIA - Drone"])
+app.include_router(gis_router, prefix="/api", tags=["SIA - GIS"])
+app.include_router(climate_router, prefix="/api", tags=["SIA - Climate"])
 app.include_router(evidence_router, prefix="/api", tags=["SIA - Evidence, AI & Readiness"])
 app.include_router(seb_router, prefix="/api", tags=["SIA - SEB & EWB Handoff"])
 app.include_router(android_router, prefix="/api", tags=["SIA - Android Field Ops"])

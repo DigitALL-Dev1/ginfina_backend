@@ -53,6 +53,14 @@ async def seed_assessment_packs(sia_case):
     collection = sia_case.assessment_pack_collection
     await collection.create_index("pack_code")
     await collection.create_index("is_active")
+    
+    # Initialize sia_case_team collection
+    await sia_case.case_team_collection.create_index("sia_case_id")
+    await sia_case.case_team_collection.create_index("consultant_id")
+    await sia_case.case_team_collection.create_index("user_id")
+    await sia_case.case_team_collection.create_index("is_lead")
+    print("sia_case_team collection initialized")
+    
     packs = [
         ("AP-001", "Initial Site Assessment Pack", "Standard"),
         ("AP-002", "Environmental Impact Assessment Pack", "Environmental"),
@@ -84,7 +92,7 @@ async def seed_assessment_packs(sia_case):
 async def initialize():
     # Resolve the intended backend configuration even when called from repo root.
     load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
-    from api import auth, project
+    from api import auth, project, consultant
     from api.SIA import sia_case
 
     try:
@@ -92,6 +100,7 @@ async def initialize():
         # Existing rows, passwords and project IDs are never replaced.
         await auth.init_db()
         await project.init_projects_collection()
+        await consultant.init_consultants_collection()
         await seed_dummy_project(auth, project)
         await seed_assessment_packs(sia_case)
         print(f"users: {await auth.users_collection.count_documents({})} records")
@@ -101,6 +110,7 @@ async def initialize():
     finally:
         auth.client.close()
         project.client.close()
+        consultant.client.close()
         sia_case.client.close()
 
 

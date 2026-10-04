@@ -17,6 +17,7 @@ db = client[DATABASE_NAME]
 sia_case_collection             = db["sia_case"]
 assessment_pack_collection      = db["sia_assessment_pack"]
 case_assessment_pack_collection = db["sia_case_assessment_pack"]
+case_team_collection            = db["sia_case_team"]
 
 router = APIRouter()
 
@@ -42,7 +43,52 @@ class SIACaseResponse(BaseModel):
     assessment_stage: Optional[str]
     crm_reference_id: Optional[str]
     opportunity_id: Optional[str]
+    team: Optional[List[dict]] = []
     created_at: datetime
+
+# ═════════════════════════════════════════════════════════
+# SIA CASE TEAM — Models
+# ═════════════════════════════════════════════════════════
+
+class TeamMember(BaseModel):
+    consultant_id: Optional[str] = Field(None, description="FK → ginfina_consultant._id")
+    user_id: Optional[str] = Field(None, description="FK → users._id (for internal users)")
+    team_role: Optional[str] = Field(None, max_length=100, description="Role in the team")
+    discipline: Optional[str] = Field(None, max_length=100, description="Discipline/specialization")
+    is_lead: Optional[bool] = Field(False, description="Is team lead")
+    assigned_at: Optional[datetime] = None
+    assigned_by: Optional[str] = Field(None, description="FK → users._id (who made the assignment)")
+
+class AddTeamMemberRequest(BaseModel):
+    consultant_id: Optional[str] = Field(None, description="FK → ginfina_consultant._id")
+    user_id: Optional[str] = Field(None, description="FK → users._id (for internal users)")
+    team_role: Optional[str] = Field(None, max_length=100, description="Role in the team")
+    discipline: Optional[str] = Field(None, max_length=100, description="Discipline/specialization")
+    is_lead: Optional[bool] = Field(False, description="Is team lead")
+    assigned_by: Optional[str] = Field(None, description="FK → users._id (who made the assignment)")
+
+
+class CaseTeamMemberCreate(AddTeamMemberRequest):
+    sia_case_id: str = Field(..., min_length=1, description="FK → sia_case._id")
+
+
+class CaseTeamMemberResponse(CaseTeamMemberCreate):
+    id: str
+    created_at: datetime
+
+
+def serialize_case_team_member(doc: dict) -> dict:
+    return {
+        "id": str(doc["_id"]),
+        "sia_case_id": doc["sia_case_id"],
+        "consultant_id": doc.get("consultant_id"),
+        "user_id": doc.get("user_id"),
+        "team_role": doc.get("team_role"),
+        "discipline": doc.get("discipline"),
+        "is_lead": doc.get("is_lead", False),
+        "assigned_by": doc.get("assigned_by"),
+        "created_at": doc["created_at"],
+    }
 
 # ═════════════════════════════════════════════════════════
 # SIA ASSESSMENT PACK — Models
@@ -87,6 +133,7 @@ def serialize_case(doc: dict) -> dict:
         "assessment_stage": doc.get("assessment_stage"),
         "crm_reference_id": doc.get("crm_reference_id"),
         "opportunity_id": doc.get("opportunity_id"),
+        "team": doc.get("team", []),
         "created_at": doc["created_at"],
     }
 
@@ -131,6 +178,7 @@ async def init_sia_case_collection():
     await case_assessment_pack_collection.create_index("sia_case_id")
     await case_assessment_pack_collection.create_index("assessment_pack_id")
     await case_assessment_pack_collection.create_index("selected_by")
+    await case_team_collection.create_index("sia_case_id")
 
     # Seed assessment pack dummy data only if collection is empty
     count = await assessment_pack_collection.count_documents({})
@@ -285,3 +333,118 @@ async def create_case_assessment_pack(data: CaseAssessmentPackCreate):
     }
     await case_assessment_pack_collection.insert_one(new_record)
     return serialize_case_assessment_pack(new_record)
+
+# ═════════════════════════════════════════════════════════
+# SIA CASE TEAM — Endpoints
+# ═════════════════════════════════════════════════════════
+
+@router.post(
+    "/sia/case-team",
+    response_model=CaseTeamMemberResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Assign Team Member to SIA Case",
+    description="Assigns a consultant or user to an SIA case team. Use consultant_id for external consultants or user_id for internal users.",
+)
+async def assign_team_member(data: CaseTeamMemberCreate):
+    # Validate sia_case exists
+    case = await sia_case_collection.find_one({"_id": data.sia_case_id})
+    if not case:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"SIA case '{data.sia_case_id}' not found",
+        )
+
+    # Ensure at least one of consultant_id or user_id is provided
+    if not data.consultant_id and not data.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Either consultant_id or user_id must be provided",
+        )
+
+    new_member = {
+        "_id": str(uuid.uuid4()),
+        "sia_case_id": data.sia_case_id,
+        "consultant_id": data.consultant_id,
+        "user_id": data.user_id,
+        "team_role": data.team_role,
+        "discipline": data.discipline,
+        "is_lead": data.is_lead if data.is_lead is not None else False,
+        "assigned_by": data.assigned_by,
+        "created_at": datetime.utcnow(),
+    }
+    await case_team_collection.insert_one(new_member)
+    return serialize_case_team_member(new_member)
+
+
+@router.get(
+    "/sia/cases/{case_id}/team",
+    response_model=List[CaseTeamMemberResponse],
+    summary="Get Team Members for SIA Case",
+    description="Returns all team members assigned to a specific SIA case.",
+)
+async def get_case_team(case_id: str):
+    # Validate sia_case exists
+    case = await sia_case_collection.find_one({"_id": case_id})
+    if not case:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"SIA case with id '{case_id}' not found",
+        )
+
+    cursor = case_team_collection.find({"sia_case_id": case_id}).sort("created_at", 1)
+    members = await cursor.to_list(length=1000)
+    return [serialize_case_team_member(m) for m in members]
+
+
+@router.delete(
+    "/sia/case-team/{member_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove Team Member from SIA Case",
+    description="Removes a team member assignment from an SIA case.",
+)
+async def remove_team_member(member_id: str):
+    result = await case_team_collection.delete_one({"_id": member_id})
+    if result.deleted_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Team member with id '{member_id}' not found",
+        )
+    return None
+
+
+@router.patch(
+    "/sia/case-team/{member_id}",
+    response_model=CaseTeamMemberResponse,
+    summary="Update Team Member Assignment",
+    description="Updates role, discipline, or lead status for a team member.",
+)
+async def update_team_member(
+    member_id: str,
+    team_role: Optional[str] = None,
+    discipline: Optional[str] = None,
+    is_lead: Optional[bool] = None,
+):
+    member = await case_team_collection.find_one({"_id": member_id})
+    if not member:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Team member with id '{member_id}' not found",
+        )
+
+    update_fields = {}
+    if team_role is not None:
+        update_fields["team_role"] = team_role
+    if discipline is not None:
+        update_fields["discipline"] = discipline
+    if is_lead is not None:
+        update_fields["is_lead"] = is_lead
+
+    if update_fields:
+        await case_team_collection.update_one(
+            {"_id": member_id},
+            {"$set": update_fields}
+        )
+        member = await case_team_collection.find_one({"_id": member_id})
+
+    return serialize_case_team_member(member)
+
